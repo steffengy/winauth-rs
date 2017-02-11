@@ -801,7 +801,6 @@ impl<'a> NtlmV2Client<'a> {
                 };
                 self.all_bytes.extend_from_slice(&bytes);
                 let mut challenge_msg = try!(ChallengeMessage::decode(bytes));
-                println!("{:?}", challenge_msg);
                 
                 // check if the challenge contains the flags we previously requested
                 if !challenge_msg.negotiate_flags.contains(needed_flags) {
