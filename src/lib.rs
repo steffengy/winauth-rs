@@ -668,10 +668,17 @@ impl<'a> Ntlmv2Response<'a> {
 
 struct NtlmV2ClientBuilder<'a> {
     target_spn: Option<Cow<'a, str>>,
-    channel_bindings: Option<Cow<'a, [u8]>>,
+    channel_bindings: Option<[u8; 16]>,
 }
 
 impl<'a> NtlmV2ClientBuilder<'a> {
+    pub fn new() -> NtlmV2ClientBuilder<'a> {
+        NtlmV2ClientBuilder {
+            target_spn: None,
+            channel_bindings: None,
+        }
+    }
+
     /// Set a target SPN. This requires a client to specify that it intends to identify against this SPN.
     /// This limits replay attacks against the same server/service, since the SPN has to match.
     pub fn target_spn<S: Into<Cow<'a, str>>>(mut self, spn: S) -> NtlmV2ClientBuilder<'a> {
@@ -681,8 +688,11 @@ impl<'a> NtlmV2ClientBuilder<'a> {
 
     /// Set a channel binding. This limits client requests to the same channel.
     /// This means e.g. that the authentication can only be successful over the same TLS connection.
-    pub fn channel_bindings(mut self, binding: Vec<u8>) -> NtlmV2ClientBuilder<'a> {
-        self.channel_bindings = Some(Cow::Owned(binding.into()));
+    pub fn channel_bindings(mut self, binding: &[u8]) -> NtlmV2ClientBuilder<'a> {
+        let mut binding_hash = [0u8; 16];
+        let data = make_sec_channel_bindings(binding, true);
+        binding_hash.copy_from_slice(&Md5::hash(&data));
+        self.channel_bindings = Some(binding_hash);
         self
     }
 
@@ -694,13 +704,11 @@ impl<'a> NtlmV2ClientBuilder<'a> {
     /// (can be relayed in general and isn't limited to the current connection)
     /// So make sure to use `target_spn`/`channel_bindings`
     pub fn build<U, P>(self, target: AuthTarget<'a>, user: U, password: P) -> NtlmV2Client<'a> where U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> {
-        let mut client = NtlmV2Client::new_insecure(target, user, password);
-        client.target_spn = self.target_spn;
-        if let Some(ref channel_bindings) = self.channel_bindings {
-            client.channel_bindings.copy_from_slice(&Md5::hash(channel_bindings));
+        NtlmV2Client {
+            target_spn: self.target_spn,
+            channel_bindings: self.channel_bindings,
+            ..NtlmV2Client::new(target, user, password)
         }
-
-        client
     }
 }
 
@@ -719,7 +727,7 @@ pub struct NtlmV2Client<'a> {
     /// only allow authentication against this SPN (little protection)
     target_spn: Option<Cow<'a, str>>,
     /// MD5 hash of gss_channel_bindings_struct
-    channel_bindings: [u8; 16],
+    channel_bindings: Option<[u8; 16]>,
     all_bytes: Vec<u8>,
 }
 
@@ -749,19 +757,14 @@ fn make_sec_channel_bindings(data: &[u8], hash: bool) -> Vec<u8> {
 impl<'a> NtlmV2Client<'a> {
     /// Construct a new authentication client that attempts to authenticate against target
     /// with the given user and password
-    ///
-    /// # Warning
-    /// This may be vulnerable to replay-attacks since it doesn't bind to any SPN 
-    /// (would be accepted by ANY server) and to any channel
-    /// (can be relayed in general and isn't limited to the current connection)
-    pub fn new_insecure<U, P>(target: AuthTarget<'a>, user: U, password: P) -> NtlmV2Client<'a> where U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> {
+    fn new<U, P>(target: AuthTarget<'a>, user: U, password: P) -> NtlmV2Client<'a> where U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> {
         NtlmV2Client {
             state: NtlmV2ClientState::Initial,
             target: target,
             user: user.into(),
             password: password.into(),
             target_spn: None,
-            channel_bindings: [0u8; 16],
+            channel_bindings: None,
             all_bytes: vec![],
         }
     }
@@ -818,9 +821,11 @@ impl<'a> NtlmV2Client<'a> {
                 if !has_flags {
                     challenge_msg.av_pairs.push(AvItem::Flags(AVF_MIC_FIELD_POPULATED));
                 }
-                //challenge_msg.av_pairs.push(AvItem::ChannelBindings(self.channel_bindings));
+                if let Some(channel_bindings) = self.channel_bindings {
+                    challenge_msg.av_pairs.push(AvItem::ChannelBindings(channel_bindings));
+                }
                 if let Some(ref target_spn) = self.target_spn {
-                    //challenge_msg.av_pairs.push(AvItem::AvTargetName(target_spn.as_ref().into()));
+                    challenge_msg.av_pairs.push(AvItem::AvTargetName(target_spn.as_ref().into()));
                 }
 
                 // extract timestamp

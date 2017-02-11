@@ -38,7 +38,7 @@ const ACCEPT_REQUEST_FLAGS: winapi::c_ulong =
 pub struct NtlmSspiBuilder<'a> {
     outbound: bool,
     target_spn: Option<Cow<'a, str>>,
-    channel_bindings: Option<Cow<'a, [u8]>>,
+    channel_bindings: Option<Vec<u8>>,
 }
 
 impl<'a> NtlmSspiBuilder<'a> {
@@ -71,8 +71,8 @@ impl<'a> NtlmSspiBuilder<'a> {
 
     /// Set a channel binding. This limits client requests to the same channel.
     /// This means e.g. that the authentication can only be successful over the same TLS connection.
-    pub fn channel_bindings(mut self, binding: Vec<u8>) -> NtlmSspiBuilder<'a> {
-        self.channel_bindings = Some(Cow::Owned(binding.into()));
+    pub fn channel_bindings(mut self, data: &[u8]) -> NtlmSspiBuilder<'a> {
+        self.channel_bindings = Some(super::make_sec_channel_bindings(data, false));
         self
     }
 
@@ -199,8 +199,9 @@ impl<'a> NtlmSspi<'a> {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use super::{ContextBuffer, NtlmSspiBuilder};
-    use {AuthTarget, NtlmV2Client};
+    use {AuthTarget, NtlmV2ClientBuilder};
 
     /// check if we can authenticate us against us (using SSPI)
     #[test]
@@ -223,11 +224,20 @@ mod tests {
         }
     }
 
+    fn get_auth_creds() -> (AuthTarget<'static>, String, String) {
+        (
+            AuthTarget::Workstation(env::var("COMPUTERNAME").unwrap().into()), 
+            env::var("USERNAME").unwrap(),
+            env::var("TEST_PW").unwrap()
+        )
+    }
+
     #[test]
     fn test_ntlm_insecure_rust_client_against_winapi_server() {
         let mut server = NtlmSspiBuilder::new().inbound().build().unwrap();
 
-        let mut client = NtlmV2Client::new_insecure(AuthTarget::Workstation("STEFFEN-PC".into()), "administrator", "");
+        let creds = get_auth_creds();
+        let mut client = NtlmV2ClientBuilder::new().build(creds.0, creds.1, creds.2);
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
         let authenticate_bytes = client.next_bytes(Some(&*challenge_bytes)).unwrap().unwrap();
@@ -238,6 +248,19 @@ mod tests {
     fn test_ntlm_channel_bindings_against_winapi() {
         let dbg_bindings = b"\x74\x6c\x73\x2d\x73\x65\x72\x76\x65\x72\x2d\x65\x6e\x64\x2d\x70\x6f\x69\x6e\x74\x3a\xea\x05\xfe\xfe\xcc\x6b\x0b\xd5\x71\xdb\xbc\x5b\xaa\x3e\xd4\x53\x86\xd0\x44\x68\x35\xf7\xb7\x4c\x85\x62\x1b\x99\x83\x47\x5f\x95";
         
+        let creds = get_auth_creds();
+
+        let mut client = NtlmV2ClientBuilder::new()
+            .channel_bindings(dbg_bindings)
+            .build(creds.0, creds.1,creds.2);
+        let mut server = NtlmSspiBuilder::new().inbound()
+            .channel_bindings(dbg_bindings)
+            .build().unwrap();
+
+        let init_bytes = client.next_bytes(None).unwrap().unwrap();
+        let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
+        let authenticate_bytes = client.next_bytes(Some(&*challenge_bytes)).unwrap().unwrap();
+        assert!(server.next_bytes(Some(&*authenticate_bytes)).unwrap().is_none());
     }
 }
 
