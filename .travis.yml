@@ -1,0 +1,9 @@
+sudo: required
+
+language: rust
+
+rust:
+  - stable
+
+script:
+  - cargo test
