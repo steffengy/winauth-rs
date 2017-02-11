@@ -666,7 +666,8 @@ impl<'a> Ntlmv2Response<'a> {
     }
 }
 
-struct NtlmV2ClientBuilder<'a> {
+/// Builder for `NtlmV2Client` which provides configuration for it
+pub struct NtlmV2ClientBuilder<'a> {
     target_spn: Option<Cow<'a, str>>,
     channel_bindings: Option<[u8; 16]>,
 }
@@ -679,14 +680,14 @@ impl<'a> NtlmV2ClientBuilder<'a> {
         }
     }
 
-    /// Set a target SPN. This requires a client to specify that it intends to identify against this SPN.
+    /// Set a target SPN. This requires a client to specify that it intends to identify against this SPN.  
     /// This limits replay attacks against the same server/service, since the SPN has to match.
     pub fn target_spn<S: Into<Cow<'a, str>>>(mut self, spn: S) -> NtlmV2ClientBuilder<'a> {
         self.target_spn = Some(spn.into());
         self
     }
 
-    /// Set a channel binding. This limits client requests to the same channel.
+    /// Set a channel binding. This limits client requests to the same channel.  
     /// This means e.g. that the authentication can only be successful over the same TLS connection.
     pub fn channel_bindings(mut self, binding: &[u8]) -> NtlmV2ClientBuilder<'a> {
         let mut binding_hash = [0u8; 16];
@@ -698,10 +699,10 @@ impl<'a> NtlmV2ClientBuilder<'a> {
 
     /// Build the resulting `NTLMv2Client`.
     ///
-     /// # Warning
-    /// This may be vulnerable to replay-attacks since it doesn't bind to any SPN 
-    /// (would be accepted by ANY server) and to any channel
-    /// (can be relayed in general and isn't limited to the current connection)
+    /// # Warning
+    /// This may be vulnerable to replay-attacks since it doesn't bind to any SPN  
+    /// (would be accepted by ANY server) and to any channel  
+    /// (can be relayed in general and isn't limited to the current connection)  
     /// So make sure to use `target_spn`/`channel_bindings`
     pub fn build<U, P>(self, target: AuthTarget<'a>, user: U, password: P) -> NtlmV2Client<'a> where U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> {
         NtlmV2Client {

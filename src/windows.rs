@@ -34,7 +34,7 @@ const ACCEPT_REQUEST_FLAGS: winapi::c_ulong =
     winapi::ASC_REQ_USE_SESSION_KEY |
     winapi::ASC_REQ_ALLOCATE_MEMORY;
 
-
+/// Builder for `NtlmSspi` which provides configuration for it
 pub struct NtlmSspiBuilder {
     outbound: bool,
     target_spn: Option<Vec<u16>>,
