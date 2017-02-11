@@ -35,14 +35,14 @@ const ACCEPT_REQUEST_FLAGS: winapi::c_ulong =
     winapi::ASC_REQ_ALLOCATE_MEMORY;
 
 
-pub struct NtlmSspiBuilder<'a> {
+pub struct NtlmSspiBuilder {
     outbound: bool,
-    target_spn: Option<Cow<'a, str>>,
+    target_spn: Option<Vec<u16>>,
     channel_bindings: Option<Vec<u8>>,
 }
 
-impl<'a> NtlmSspiBuilder<'a> {
-    pub fn new() -> NtlmSspiBuilder<'a> {
+impl NtlmSspiBuilder {
+    pub fn new() -> NtlmSspiBuilder {
         NtlmSspiBuilder {
             outbound: true,
             target_spn: None,
@@ -51,32 +51,32 @@ impl<'a> NtlmSspiBuilder<'a> {
     }
 
     /// Outbound Mode = Client Mode (authenticate against a server)
-    pub fn outbound(mut self) -> NtlmSspiBuilder<'a> {
+    pub fn outbound(mut self) -> NtlmSspiBuilder {
         self.outbound = true;
         self
     }
 
     /// Inbound Mode = Server Mode (accept authentication from a client)
-    pub fn inbound(mut self) -> NtlmSspiBuilder<'a> {
+    pub fn inbound(mut self) -> NtlmSspiBuilder {
         self.outbound = false;
         self
     }
 
     /// Set a target SPN. This requires a client to specify that it intends to identify against this SPN.
     /// This limits replay attacks against the same server/service, since the SPN has to match.
-    pub fn target_spn<S: Into<Cow<'a, str>>>(mut self, spn: S) -> NtlmSspiBuilder<'a> {
-        self.target_spn = Some(spn.into());
+    pub fn target_spn(mut self, spn: &str) -> NtlmSspiBuilder {
+        self.target_spn = Some(spn.encode_utf16().collect());
         self
     }
 
     /// Set a channel binding. This limits client requests to the same channel.
     /// This means e.g. that the authentication can only be successful over the same TLS connection.
-    pub fn channel_bindings(mut self, data: &[u8]) -> NtlmSspiBuilder<'a> {
+    pub fn channel_bindings(mut self, data: &[u8]) -> NtlmSspiBuilder {
         self.channel_bindings = Some(super::make_sec_channel_bindings(data, false));
         self
     }
 
-    pub fn build(self) -> Result<NtlmSspi<'a>, io::Error> {
+    pub fn build(self) -> Result<NtlmSspi, io::Error> {
         NtlmSspi::new(self)
     }
 }
@@ -86,13 +86,13 @@ impl<'a> NtlmSspiBuilder<'a> {
 ///
 /// # Warning
 /// Using `target_spn` or/and `channel_bindings` is RECOMMENDED for security purposes!
-pub struct NtlmSspi<'a> {
-    builder: NtlmSspiBuilder<'a>,
+pub struct NtlmSspi {
+    builder: NtlmSspiBuilder,
     ctx: Option<SecurityContext>,
     cred: NtlmCred,
 }
 
-impl<'a> NtlmSspi<'a> {
+impl NtlmSspi {
     fn new(builder: NtlmSspiBuilder) -> Result<NtlmSspi, io::Error> {
         unsafe {
             let mut handle = mem::zeroed();
@@ -152,12 +152,13 @@ impl<'a> NtlmSspi<'a> {
 
             let mut outbuf = [secbuf(winapi::SECBUFFER_TOKEN, None)];
             let mut outbuf_desc = secbuf_desc(&mut outbuf);
+            let target_name_ptr = self.builder.target_spn.as_mut().map(|x| x.as_mut_ptr()).unwrap_or(ptr::null_mut());
             // create a token message
             let mut attrs = 0u32;
             let ret = if self.builder.outbound {
                 secur32::InitializeSecurityContextW(&mut self.cred.0,
                                                     ctx_ptr_in,
-                                                    ptr::null_mut(),
+                                                    target_name_ptr,
                                                     INIT_REQUEST_FLAGS,
                                                     0,
                                                     winapi::SECURITY_NETWORK_DREP,
@@ -233,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ntlm_insecure_rust_client_against_winapi_server() {
+    fn test_ntlm_insecure_rust_client_against_winapi() {
         let mut server = NtlmSspiBuilder::new().inbound().build().unwrap();
 
         let creds = get_auth_creds();
@@ -256,6 +257,24 @@ mod tests {
         let mut server = NtlmSspiBuilder::new().inbound()
             .channel_bindings(dbg_bindings)
             .build().unwrap();
+
+        let init_bytes = client.next_bytes(None).unwrap().unwrap();
+        let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
+        let authenticate_bytes = client.next_bytes(Some(&*challenge_bytes)).unwrap().unwrap();
+        assert!(server.next_bytes(Some(&*authenticate_bytes)).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_ntlm_target_spn_against_winapi() {
+        let creds = get_auth_creds();
+
+        let mut client = NtlmV2ClientBuilder::new()
+            .target_spn("test-pc")
+            .build(creds.0, creds.1,creds.2);
+        let mut server = NtlmSspiBuilder::new().inbound()
+            .build().unwrap();
+
+        // TODO: for CI register an SPN so that this test fails (since the SPN should match)
 
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
