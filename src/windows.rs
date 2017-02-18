@@ -65,7 +65,7 @@ impl NtlmSspiBuilder {
     /// Set a target SPN. This requires a client to specify that it intends to identify against this SPN.
     /// This limits replay attacks against the same server/service, since the SPN has to match.
     pub fn target_spn(mut self, spn: &str) -> NtlmSspiBuilder {
-        self.target_spn = Some(spn.encode_utf16().collect());
+        self.target_spn = Some(spn.encode_utf16().chain(Some(0)).collect());
         self
     }
 
