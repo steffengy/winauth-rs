@@ -18,4 +18,4 @@ install:
 build: false
 
 test_script:
-  - cargo test --target %TARGET% --all
+  - cargo test --target %TARGET% -p winauth
