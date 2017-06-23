@@ -6,6 +6,7 @@ documentation = "https://docs.rs/winauth/"
 version = "0.0.1"
 authors = ["Steffen Butzer <steffen.butzer@outlook.com>"]
 license = "MIT/Apache-2.0"
+keywords = ["ntlm", "sspi", "winauth"]
 
 [dependencies]
 bitflags = "0.8"
