@@ -39,6 +39,10 @@ trait FromUint where Self: Sized {
     fn from_u16(n: u16) -> Option<Self>;
 }
 
+pub trait NextBytes {
+    fn next_bytes(&mut self, bytes: Option<&[u8]>) -> io::Result<Option<Vec<u8>>>;
+}
+
 macro_rules! uint_to_enum {
     ($ty:ident, $($variant:ident),*) => {
         impl FromUint for $ty {
@@ -769,10 +773,12 @@ impl<'a> NtlmV2Client<'a> {
             all_bytes: vec![],
         }
     }
+}
 
+impl<'a> NextBytes for NtlmV2Client<'a> {
     /// This returns the next bytes which have to be sent to the server.  
     /// The authentication is complete, when this returns `None`
-    pub fn next_bytes(&mut self, bytes: Option<&[u8]>) -> io::Result<Option<Vec<u8>>> {
+    fn next_bytes(&mut self, bytes: Option<&[u8]>) -> io::Result<Option<Vec<u8>>> {
         let needed_flags = NTLMSSP_NEGOTIATE_TARGET_INFO | 
                          NTLMSSP_NEGOTIATE_128 | 
                          NTLMSSP_NEGOTIATE_KEY_EXCH | 
@@ -799,8 +805,8 @@ impl<'a> NtlmV2Client<'a> {
                 } else {
                     return Err(io::Error::new(io::ErrorKind::InvalidData, "bytes given for initial ntlm client state (expected none)"));
                 };
-                self.all_bytes.extend_from_slice(&bytes);
-                let mut challenge_msg = try!(ChallengeMessage::decode(bytes));
+                self.all_bytes.extend_from_slice(bytes.as_ref());
+                let mut challenge_msg = try!(ChallengeMessage::decode(bytes.as_ref()));
                 
                 // check if the challenge contains the flags we previously requested
                 if !challenge_msg.negotiate_flags.contains(needed_flags) {

@@ -11,6 +11,7 @@ use std::mem;
 use std::ops::Deref;
 use std::ptr;
 use std::slice;
+use NextBytes;
 
 static NTLM_PROVIDER: &'static [u8] = b"NTLM\0";
 
@@ -125,8 +126,10 @@ impl NtlmSspi {
             Ok(sso)
         }
     }
+}
 
-    pub fn next_bytes(&mut self, in_bytes: Option<&[u8]>) -> Result<Option<ContextBuffer>, io::Error> {
+impl NextBytes for NtlmSspi {
+    fn next_bytes(&mut self, in_bytes: Option<&[u8]>) -> Result<Option<Vec<u8>>, io::Error> {
         unsafe {
             let mut ctx = None;
 
@@ -136,9 +139,10 @@ impl NtlmSspi {
                 ctx = Some(mem::zeroed());
                 (ctx.as_mut().unwrap() as *mut _, ptr::null_mut())
             };
-    
+
             let has_in_bytes = in_bytes.is_some();
-            let mut inbuf = [secbuf(winapi::SECBUFFER_EMPTY, None), secbuf(winapi::SECBUFFER_TOKEN, in_bytes)];
+            let mut inbuf = [secbuf(winapi::SECBUFFER_EMPTY, None), 
+                             secbuf(winapi::SECBUFFER_TOKEN, in_bytes.as_ref().map(|x| x.as_ref()))];
             if let Some(ref binding) = self.builder.channel_bindings {
                 inbuf[0] = secbuf(winapi::SECBUFFER_CHANNEL_BINDINGS, Some(binding));
             }
@@ -186,7 +190,7 @@ impl NtlmSspi {
                         self.ctx = Some(SecurityContext(new_ctx));
                     }
                     if outbuf[0].cbBuffer > 0 {
-                        Ok(Some(ContextBuffer(outbuf[0])))
+                        Ok(Some(ContextBuffer(outbuf[0]).as_ref().to_vec()))
                     } else {
                         assert_eq!(ret, winapi::SEC_E_OK);
                         Ok(None)
@@ -202,22 +206,22 @@ impl NtlmSspi {
 mod tests {
     use std::env;
     use super::{ContextBuffer, NtlmSspiBuilder};
-    use {AuthTarget, NtlmV2ClientBuilder};
+    use {AuthTarget, NextBytes, NtlmV2ClientBuilder};
 
     /// check if we can authenticate us against us (using SSPI)
     #[test]
     fn test_winapi_sspi_ntlm_auth() {
         let mut client = NtlmSspiBuilder::new().outbound().build().unwrap();
         let mut server = NtlmSspiBuilder::new().inbound().build().unwrap();
-        let mut next_client_bytes: Option<ContextBuffer> = None;
-        let mut next_server_bytes: Option<ContextBuffer> = None;
+        let mut next_client_bytes: Option<Vec<u8>> = None;
+        let mut next_server_bytes: Option<Vec<u8>> = None;
 
         loop {
             {
-                let client_bytes = next_client_bytes.as_ref().map(|x| &**x);
+                let client_bytes = next_client_bytes.as_ref().map(|x| x.as_slice());
                 next_server_bytes = client.next_bytes(client_bytes).unwrap();
             }
-            let server_bytes = next_server_bytes.as_ref().map(|x| &**x);
+            let server_bytes = next_server_bytes.as_ref().map(|x| x.as_slice());
             next_client_bytes = server.next_bytes(server_bytes).unwrap();
             if next_client_bytes.is_none() {
                 break;
@@ -241,8 +245,8 @@ mod tests {
         let mut client = NtlmV2ClientBuilder::new().build(creds.0, creds.1, creds.2);
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
-        let authenticate_bytes = client.next_bytes(Some(&*challenge_bytes)).unwrap().unwrap();
-        assert!(server.next_bytes(Some(&*authenticate_bytes)).unwrap().is_none());
+        let authenticate_bytes = client.next_bytes(Some(&challenge_bytes)).unwrap().unwrap();
+        assert!(server.next_bytes(Some(&authenticate_bytes)).unwrap().is_none());
     }
 
     #[test]
@@ -260,8 +264,8 @@ mod tests {
 
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
-        let authenticate_bytes = client.next_bytes(Some(&*challenge_bytes)).unwrap().unwrap();
-        assert!(server.next_bytes(Some(&*authenticate_bytes)).unwrap().is_none());
+        let authenticate_bytes = client.next_bytes(Some(&challenge_bytes)).unwrap().unwrap();
+        assert!(server.next_bytes(Some(&authenticate_bytes)).unwrap().is_none());
     }
 
     #[test]
@@ -278,8 +282,8 @@ mod tests {
 
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
-        let authenticate_bytes = client.next_bytes(Some(&*challenge_bytes)).unwrap().unwrap();
-        assert!(server.next_bytes(Some(&*authenticate_bytes)).unwrap().is_none());
+        let authenticate_bytes = client.next_bytes(Some(&challenge_bytes)).unwrap().unwrap();
+        assert!(server.next_bytes(Some(&authenticate_bytes)).unwrap().is_none());
     }
 }
 
@@ -316,10 +320,8 @@ impl Drop for ContextBuffer {
     }
 }
 
-impl Deref for ContextBuffer {
-    type Target = [u8];
-
-    fn deref(&self) -> &[u8] {
+impl AsRef<[u8]> for ContextBuffer {
+    fn as_ref(&self) -> &[u8] {
         unsafe { slice::from_raw_parts(self.0.pvBuffer as *const _, self.0.cbBuffer as usize) }
     }
 }

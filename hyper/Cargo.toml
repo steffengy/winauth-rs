@@ -1,0 +1,18 @@
+[package]
+name = "hyper-winauth"
+version = "0.0.1"
+authors = ["Steffen Butzer <steffen.butzer@outlook.com>"]
+keywords = ["ntlm", "sspi", "winauth"]
+repository = "https://github.com/steffengy/winauth-rs"
+documentation = "https://docs.rs/hyper-winauth/"
+license = "MIT/Apache-2.0"
+
+[dependencies]
+bytes = "0.4"
+base64 = "0.6"
+futures = "0.1"
+hyper = "0.11"
+winauth = { path = "../winauth" }
+
+[dev-dependencies]
+tokio-core = "0.1"
