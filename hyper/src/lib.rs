@@ -231,6 +231,8 @@ impl<T> client::Service for WinAuthClient<T>
     }
 }
 
+// TODO: run tests on linux too
+#[cfg(windows)]
 #[cfg(test)]
 mod tests {
     extern crate tokio_core;
