@@ -152,6 +152,8 @@ impl NextBytes for NtlmSspi {
                 ptr::null_mut()
             };
 
+            let inbuf_ptr = &mut inbuf_desc as *mut _;
+
             let mut outbuf = [secbuf(winapi::SECBUFFER_TOKEN, None)];
             let mut outbuf_desc = secbuf_desc(&mut outbuf);
             let target_name_ptr = self.builder.target_spn.as_mut().map(|x| x.as_mut_ptr()).unwrap_or(ptr::null_mut());
@@ -248,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn test_ntlm_channel_bindings_against_winapi() {
+    fn test_ntlm_channel_bindings_winapi_server() {
         let dbg_bindings = b"\x74\x6c\x73\x2d\x73\x65\x72\x76\x65\x72\x2d\x65\x6e\x64\x2d\x70\x6f\x69\x6e\x74\x3a\xea\x05\xfe\xfe\xcc\x6b\x0b\xd5\x71\xdb\xbc\x5b\xaa\x3e\xd4\x53\x86\xd0\x44\x68\x35\xf7\xb7\x4c\x85\x62\x1b\x99\x83\x47\x5f\x95";
         
         let creds = get_auth_creds();

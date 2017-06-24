@@ -118,7 +118,7 @@ bitflags! {
         /// M-bit
         /// requests a signature block
         const NTLMSSP_NEGOTIATE_ALWAYS_SIGN = 1<<15,
-        // r7
+        // r7 (Negotiate Local Call, 1 << 14)
 
         /// L-bit
         const NTLMSSP_NEGOTIATE_OEM_WORKSTATION_SUPPLIED = 1<<13,
@@ -715,15 +715,22 @@ pub struct NtlmV2Client<'a> {
 }
 
 /// gss_channel_bindings_struct
-/// https://msdn.microsoft.com/en-us/library/windows/desktop/dd919963(v=vs.85).aspx
+
 ///
 /// # Really MS.
-/// seems like we need different data to (md5-)hash it since some struct fields are not included
-/// in the hash (as well as the terminating offset)... GREAT.
-/// https://social.msdn.microsoft.com/Forums/Windowsserver/en-US/3ecb99c5-542e-4bcd-a808-116eb915cff8/enabling-channel-binding-for-kerberos-authentication-in-a-3rd-party-library-openssl
+/// WinAPI uses SEC_CHANNEL_BINDINGS: https://msdn.microsoft.com/en-us/library/windows/desktop/dd919963(v=vs.85).aspx
+///
+/// For hashing the layout of gss_channel_bindings_struct (which is different to SEC_CHANNEL_BINDINGS) is used, as hinted here:
+/// https://blogs.msdn.microsoft.com/openspecification/2013/03/26/ntlm-and-channel-binding-hash-aka-extended-protection-for-authentication/
+///
+/// 00 00 00 00 //initiator_addtype
+/// 00 00 00 00 //initiator_address length
+/// 00 00 00 00 //acceptor_addrtype
+/// 00 00 00 00 //acceptor_address length
+/// 35 00 00 00 //application_data length (53 bytes)
+/// 74 6c 73 2d //application data, as calculated above
 fn make_sec_channel_bindings(data: &[u8], hash: bool) -> Vec<u8> {
     let mut buf = Vec::with_capacity(data.len() + 32);
-    // unwrap here cannot fail (except OOM but then we have other issues)
     if hash {
         buf.extend_from_slice(&[0u8; 16])
     } else {
@@ -732,6 +739,7 @@ fn make_sec_channel_bindings(data: &[u8], hash: bool) -> Vec<u8> {
     buf.write_u32::<LittleEndian>(data.len() as u32).unwrap();
     if !hash {
         buf.write_u32::<LittleEndian>(32).unwrap();
+        assert_eq!(buf.len(), 32);
     }
     buf.extend_from_slice(&data);
     buf
