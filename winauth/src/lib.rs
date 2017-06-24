@@ -14,10 +14,10 @@ extern crate rand;
 extern crate md5;
 
 use std::borrow::Cow;
-use std::cmp;
+use std::env;
 use std::io::{self, Cursor, Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use byteorder::{ByteOrder, WriteBytesExt, ReadBytesExt, LittleEndian, BigEndian};
+use byteorder::{ByteOrder, WriteBytesExt, ReadBytesExt, LittleEndian};
 use rand::Rng;
 
 mod hmac;
@@ -162,15 +162,6 @@ bitflags! {
     }
 }
 
-impl<'a> AuthTarget<'a> {
-    #[inline]
-    fn len(&self) -> usize {
-        match *self {
-            AuthTarget::Workstation(ref name) | AuthTarget::Domain(ref name) => name.len(),
-        }
-    }
-}
-
 /// specified in 2.2.1.1 NEGOTIATE_MESSAGE
 struct NegotiateMessage {
     negotiate_flags: NegotiateFlags,
@@ -305,7 +296,7 @@ impl<R: Read> DecodeExt for R {
             return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{} unicode value has to be a multiple of 2 (utf16)", name)));
         }
         let mut bytes: Vec<u16> = Vec::with_capacity(len as usize / 2);
-        for i in 0..len as usize / 2 {
+        for _ in 0..len as usize / 2 {
             bytes.push(try!(self.read_u16::<LittleEndian>()));
         }
         let str_ = try!(String::from_utf16(&bytes).map_err(|_| 
@@ -381,7 +372,7 @@ impl ChallengeMessage {
         if target_name_len != try!(r.read_u16::<LittleEndian>()) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "target_name and target_name_max are not equal"));
         }
-        let mut target_name_offset = try!(r.read_u32::<LittleEndian>());
+        let target_name_offset = try!(r.read_u32::<LittleEndian>());
 
         let raw_flags = try!(r.read_u32::<LittleEndian>());
         let negotiate_flags = try!(NegotiateFlags::from_bits(raw_flags)
@@ -396,7 +387,7 @@ impl ChallengeMessage {
         if target_info_len != try!(r.read_u16::<LittleEndian>()) {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "target_info and target_info_max are not equal"));
         }
-        let mut target_info_offset = try!(r.read_u32::<LittleEndian>());
+        let target_info_offset = try!(r.read_u32::<LittleEndian>());
 
         if negotiate_flags.contains(NTLMSSP_NEGOTIATE_VERSION) {
             payload_offset += 8;
@@ -422,7 +413,7 @@ impl ChallengeMessage {
         let mut target_name: Option<String> = None;
         let mut av_pairs: Vec<AvItem> = vec![];
 
-        for i in 0..payload_elements {
+        for _ in 0..payload_elements {
             let parse_target_name = (target_info_offset > target_name_offset) && target_name.is_none() || !av_pairs.is_empty();
             let parse_av_pairs = (target_info_offset < target_name_offset) && av_pairs.is_empty() || target_name.is_some();
 
@@ -451,28 +442,14 @@ impl ChallengeMessage {
     }
 }
 
-/// The target to authenticate against
-pub enum AuthTarget<'a> {
-    /// Authenticate against a Workgroup
-    Workstation(Cow<'a, str>),
-    /// Authenticate against a NT-Domain
-    Domain(Cow<'a, str>),
-}
-
-impl<'a> AuthTarget<'a> {
-    fn shallow_clone(&'a self) -> AuthTarget<'a> {
-        match *self {
-            AuthTarget::Workstation(ref ws) => AuthTarget::Workstation(ws.as_ref().into()),
-            AuthTarget::Domain(ref dom) => AuthTarget::Domain(dom.as_ref().into()),
-        }
-    }
-}
-
 /// 2.2.1.3
 struct AuthenticateMessage<'a> {
-    target: AuthTarget<'a>,
+    /// The name of the (local) workstation (running this code)
+    /// used by the server to determine if it can perform local auth.
+    workstation: Option<Cow<'a, str>>,
+    /// The domain name, if applicable, for the specified login user
+    domain: Option<Cow<'a, str>>,
     user: Cow<'a, str>,
-    password: Cow<'a, str>,
     nt_challenge_response: &'a [u8],
     encrypted_random_session_key: &'a [u8],
     exported_session_key: &'a [u8],
@@ -535,10 +512,8 @@ impl<'a> AuthenticateMessage<'a> {
         }
 
         // write domain and workstation name and user name
-        let (domain, workstation) = match self.target {
-            AuthTarget::Workstation(ref name) => ("", name.as_ref()),
-            AuthTarget::Domain(ref name) => (name.as_ref(), ""),
-        };
+        let workstation = self.workstation.as_ref().map(|x| x.as_ref()).unwrap_or("");
+        let domain = self.domain.as_ref().map(|x| x.as_ref()).unwrap_or("");
 
         for str_ in &[domain, self.user.as_ref(), workstation] {
             let field_len = 2*str_.len();
@@ -567,9 +542,9 @@ impl<'a> AuthenticateMessage<'a> {
         bytes.set_position(bak);
 
         // write negotiate flags
-        let (remove, insert) = match self.target {
-            AuthTarget::Workstation(_) => (NTLMSSP_TARGET_TYPE_DOMAIN, NTLMSSP_TARGET_TYPE_SERVER),
-            AuthTarget::Domain(_) =>  (NTLMSSP_TARGET_TYPE_SERVER, NTLMSSP_TARGET_TYPE_DOMAIN),
+        let (remove, insert) = match self.domain {
+            None => (NTLMSSP_TARGET_TYPE_DOMAIN, NTLMSSP_TARGET_TYPE_SERVER),
+            Some(_) =>  (NTLMSSP_TARGET_TYPE_SERVER, NTLMSSP_TARGET_TYPE_DOMAIN),
         };
         let mut flags = self.negotiate_flags.clone();
         flags.remove(remove);
@@ -624,7 +599,7 @@ impl<'a> Ntlmv2Response<'a> {
             // nanoseconds since mindnight Jan. 1, 1601 (UTC) / 100
             let delta_time = 116444736000000000u64; 
             let unix_time_delta = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Err(x) => return Err(io::Error::new(io::ErrorKind::Other, "could not convert current systemtime")),
+                Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "could not convert current systemtime")),
                 Ok(x) => x,
             };
             delta_time + (unix_time_delta.as_secs() as u64 * (1e9 as u64 / 100)) + (unix_time_delta.subsec_nanos() as u64 / 100)
@@ -708,11 +683,13 @@ impl<'a> NtlmV2ClientBuilder<'a> {
     /// (would be accepted by ANY server) and to any channel  
     /// (can be relayed in general and isn't limited to the current connection)  
     /// So make sure to use `target_spn`/`channel_bindings`
-    pub fn build<U, P>(self, target: AuthTarget<'a>, user: U, password: P) -> NtlmV2Client<'a> where U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> {
+    pub fn build<D, U, P>(self, domain: Option<D>, user: U, password: P) -> NtlmV2Client<'a> 
+        where D: Into<Cow<'a, str>>, U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> 
+    {
         NtlmV2Client {
             target_spn: self.target_spn,
             channel_bindings: self.channel_bindings,
-            ..NtlmV2Client::new(target, user, password)
+            ..NtlmV2Client::new(domain, user, password)
         }
     }
 }
@@ -726,7 +703,8 @@ enum NtlmV2ClientState {
 /// An authentication client to authenticate against a server (outbound)
 pub struct NtlmV2Client<'a> {
     state: NtlmV2ClientState,
-    target: AuthTarget<'a>,
+    workstation: Option<Cow<'a, str>>,
+    domain: Option<Cow<'a, str>>,
     user: Cow<'a, str>,
     password: Cow<'a, str>,
     /// only allow authentication against this SPN (little protection)
@@ -746,7 +724,7 @@ pub struct NtlmV2Client<'a> {
 fn make_sec_channel_bindings(data: &[u8], hash: bool) -> Vec<u8> {
     let mut buf = Vec::with_capacity(data.len() + 32);
     // unwrap here cannot fail (except OOM but then we have other issues)
-    let fill = if hash {
+    if hash {
         buf.extend_from_slice(&[0u8; 16])
     } else {
         buf.extend_from_slice(&[0u8; 24])
@@ -762,10 +740,17 @@ fn make_sec_channel_bindings(data: &[u8], hash: bool) -> Vec<u8> {
 impl<'a> NtlmV2Client<'a> {
     /// Construct a new authentication client that attempts to authenticate against target
     /// with the given user and password
-    fn new<U, P>(target: AuthTarget<'a>, user: U, password: P) -> NtlmV2Client<'a> where U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> {
+    fn new<D, U, P>(domain: Option<D>, user: U, password: P) -> NtlmV2Client<'a> 
+        where D: Into<Cow<'a, str>>, U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> 
+    {
+        let workstation = match env::var("COMPUTERNAME") {
+            Ok(x) => x.into(),
+            Err(_) => "RUSTY_NTLM_CLIENT".into(),
+        };
         NtlmV2Client {
             state: NtlmV2ClientState::Initial,
-            target: target,
+            workstation: Some(workstation),
+            domain: domain.map(|x| x.into()),
             user: user.into(),
             password: password.into(),
             target_spn: None,
@@ -839,7 +824,7 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                     let (mut name, mut timestamp) = (false, None);
                     for item in &challenge_msg.av_pairs {
                         match *item {
-                            AvItem::DnsComputerName(ref str_) => name = true,
+                            AvItem::DnsComputerName(_) => name = true,
                             AvItem::Timestamp(ts) => timestamp = Some(ts),
                             _ => ()
                         }
@@ -853,9 +838,9 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                 };
 
                 // 3.1.5.1.2 Client Receives a CHALLENGE_MESSAGE
-                let domain = match self.target {
-                    AuthTarget::Domain(ref domain) => domain,
-                    _ => ""
+                let domain = match self.domain {
+                    Some(ref domain) => domain,
+                    None => ""
                 };
                 let ntlmv2_response = {
                     let ntlmv2_response = Ntlmv2Response {
@@ -869,9 +854,9 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                     try!(ntlmv2_response.encode())
                 };
                 let auth_msg = AuthenticateMessage {
-                    target: self.target.shallow_clone(),
+                    domain: self.domain.as_ref().map(|x| x.as_ref().into()),
+                    workstation: self.workstation.as_ref().map(|x| x.as_ref().into()),
                     user: self.user.as_ref().into(),
-                    password: self.password.as_ref().into(),
                     nt_challenge_response: &ntlmv2_response.response,
                     exported_session_key: &ntlmv2_response.exported_session_key,
                     encrypted_random_session_key: &ntlmv2_response.encrypted_random_session_key,

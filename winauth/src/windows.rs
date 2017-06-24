@@ -5,10 +5,8 @@ extern crate kernel32;
 extern crate secur32;
 extern crate winapi;
 
-use std::borrow::Cow;
 use std::io;
 use std::mem;
-use std::ops::Deref;
 use std::ptr;
 use std::slice;
 use NextBytes;
@@ -117,7 +115,7 @@ impl NtlmSspi {
                 err => return Err(io::Error::from_raw_os_error(err as i32)),
             };
 
-            let mut sso = NtlmSspi {
+            let sso = NtlmSspi {
                 builder: builder,
                 ctx: None,
                 cred: cred,
@@ -205,8 +203,8 @@ impl NextBytes for NtlmSspi {
 #[cfg(test)]
 mod tests {
     use std::env;
-    use super::{ContextBuffer, NtlmSspiBuilder};
-    use {AuthTarget, NextBytes, NtlmV2ClientBuilder};
+    use super::NtlmSspiBuilder;
+    use {NextBytes, NtlmV2ClientBuilder};
 
     /// check if we can authenticate us against us (using SSPI)
     #[test]
@@ -214,13 +212,13 @@ mod tests {
         let mut client = NtlmSspiBuilder::new().outbound().build().unwrap();
         let mut server = NtlmSspiBuilder::new().inbound().build().unwrap();
         let mut next_client_bytes: Option<Vec<u8>> = None;
-        let mut next_server_bytes: Option<Vec<u8>> = None;
+        let mut next_server_bytes: Option<Vec<u8>>;
 
         loop {
-            {
+            next_server_bytes = {
                 let client_bytes = next_client_bytes.as_ref().map(|x| x.as_slice());
-                next_server_bytes = client.next_bytes(client_bytes).unwrap();
-            }
+                client.next_bytes(client_bytes).unwrap()
+            };
             let server_bytes = next_server_bytes.as_ref().map(|x| x.as_slice());
             next_client_bytes = server.next_bytes(server_bytes).unwrap();
             if next_client_bytes.is_none() {
@@ -229,9 +227,9 @@ mod tests {
         }
     }
 
-    fn get_auth_creds() -> (AuthTarget<'static>, String, String) {
+    fn get_auth_creds() -> (Option<String>, String, String) {
         (
-            AuthTarget::Workstation(env::var("COMPUTERNAME").unwrap().into()), 
+            None, 
             env::var("USERNAME").unwrap(),
             env::var("TEST_PW").unwrap()
         )
