@@ -6,4 +6,4 @@ rust:
   - stable
 
 script:
-  - cargo test -p winauth
+  - cargo test --all

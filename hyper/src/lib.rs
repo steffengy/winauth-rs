@@ -7,74 +7,47 @@ extern crate hyper;
 extern crate winauth;
 
 use std::borrow::Cow;
-use std::cmp;
 use std::fmt;
-use std::str::{self, FromStr};
+use std::str;
 use std::sync::Arc;
 use futures::{Async, Future, Poll, Stream};
 use hyper::client;
 use hyper::header;
 
-#[derive(Clone, PartialEq, Debug)]
-struct WWWAuthenticate<S: header::Scheme>(S);
-
-/// A base64 encoded handshake payload
-#[derive(Clone, PartialEq, Debug)]
-struct NTLM<'a>(Option<Cow<'a, [u8]>>);
-
-impl<'a> header::Scheme for NTLM<'a> {
-    fn scheme() -> Option<&'static str> {
-        Some("NTLM")
-    }
-
-    fn fmt_scheme(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(ref bytes) = self.0 {
-            f.write_str(&base64::encode(bytes))?;
-        }
-        Ok(())
-    }
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum Scheme {
+    Ntlm,
 }
 
-impl<'a> FromStr for NTLM<'a> {
-    type Err = hyper::Error;
+#[derive(Clone, PartialEq, Debug)]
+struct WWWAuthenticate(Vec<(Scheme, Option<Vec<u8>>)>);
 
-    fn from_str(s: &str) -> hyper::Result<NTLM<'a>> {
-        if s.is_empty() {
-            return Ok(NTLM(None));
-        }
-        match base64::decode(s) {
-            Ok(decoded) => Ok(NTLM(Some(decoded.into()))),
-            Err(_) => Err(hyper::Error::Header),
-        }
-    }
-}
-
-impl<S: header::Scheme + 'static> header::Header for WWWAuthenticate<S> {
+impl header::Header for WWWAuthenticate {
     fn header_name() -> &'static str {
         "WWW-Authenticate"
     }
 
-    fn parse_header(raw: &header::Raw) -> hyper::Result<WWWAuthenticate<S>> {
-        if let Some(line) = raw.one() {
+    fn parse_header(raw: &header::Raw) -> hyper::Result<WWWAuthenticate> {
+        let mut pairs = Vec::with_capacity(raw.len());
+        for line in raw {
             let header = try!(str::from_utf8(line));
-            if let Some(scheme) = <S as header::Scheme>::scheme() {
-                if header.starts_with(scheme) {
-                    let start_idx = cmp::min(scheme.len() + 1, header.len());
-                    match header[start_idx..].parse::<S>().map(WWWAuthenticate) {
-                        Ok(h) => Ok(h),
-                        Err(_) => Err(hyper::Error::Header)
-                    }
-                } else {
-                    Err(hyper::Error::Header)
-                }
-            } else {
-                match header.parse::<S>().map(WWWAuthenticate) {
-                    Ok(h) => Ok(h),
-                    Err(_) => Err(hyper::Error::Header)
+            let scheme = "NTLM";
+            if header.starts_with(scheme) {
+                if scheme.len() + 1 < line.len() {
+                    let bytes = match base64::decode(&header[scheme.len()+1..]) {
+                        Err(_) => return Err(hyper::Error::Header),
+                        Ok(x) => x,
+                    };
+                    pairs.push((Scheme::Ntlm, Some(bytes)));
+                }  else {
+                    pairs.push((Scheme::Ntlm, None))
                 }
             }
-        } else {
+        }
+        if pairs.is_empty() {
             Err(hyper::Error::Header)
+        } else {
+            Ok(WWWAuthenticate(pairs))
         }
     }
 
@@ -83,12 +56,9 @@ impl<S: header::Scheme + 'static> header::Header for WWWAuthenticate<S> {
     }
 }
 
-impl<S: header::Scheme> fmt::Display for WWWAuthenticate<S> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(scheme) = <S as header::Scheme>::scheme() {
-            try!(write!(f, "{} ", scheme))
-        };
-        self.0.fmt_scheme(f)
+impl fmt::Display for WWWAuthenticate {
+    fn fmt(&self, _: &mut fmt::Formatter) -> fmt::Result {
+        unimplemented!();
     }
 }
 
@@ -172,27 +142,37 @@ impl<T> Future for WinAuthFuture<T>
                 InnerState::Req(ref mut chunks, ref mut req) => {
                     let resp = try_ready!(req.poll());
                     let mut done = true;
-                    if let Some(header) = resp.headers().get::<WWWAuthenticate<NTLM>>() {
-                        if (header.0).0.is_none() {
-                            assert!(self.winauth.is_none());
-                            let winauth = match self.inner.auth {
-                                #[cfg(windows)]
-                                AuthMethod::SSPI_SSO => {
-                                    Box::new(winauth::windows::NtlmSspiBuilder::new().build()?)
-                                }
-                                AuthMethod::NTLMv2(_, _) => {
-                                    // Box::new(winauth::NtlmV2ClientBuilder::build(
-                                    unimplemented!()
-                                }
-                            };
-                            self.winauth = Some(winauth);
-                        }
-                        let next = self.winauth.as_mut().unwrap()
-                                               .next_bytes((header.0).0.as_ref().map(|x| &**x))?;
+                    if let Some(header) = resp.headers().get::<WWWAuthenticate>() {
+                        // check if NTLM authentication is supported/requested
+                        let elem = header.0.iter()
+                                           .filter(|&&(x, _)| x == Scheme::Ntlm)
+                                           .map(|&(_, ref x)| x)
+                                           .nth(0);
 
-                        if let Some(next) = next {
-                            self.headers.set(hyper::header::Authorization(NTLM(Some(Cow::Owned(next)))));
-                            done = false;
+                        if let Some(elem) = elem {
+                            // check if this is the initial request (not containing any bytes)
+                            if elem.is_none() {
+                                assert!(self.winauth.is_none());
+                                let winauth = match self.inner.auth {
+                                    #[cfg(windows)]
+                                    AuthMethod::SSPI_SSO => {
+                                        Box::new(winauth::windows::NtlmSspiBuilder::new().build()?)
+                                    }
+                                    AuthMethod::NTLMv2(_, _) => {
+                                        // Box::new(winauth::NtlmV2ClientBuilder::build(
+                                        unimplemented!()
+                                    }
+                                };
+                                self.winauth = Some(winauth);
+                            }
+                            let next = self.winauth.as_mut().unwrap()
+                                           .next_bytes(elem.as_ref().map(|x| &**x))?;
+
+                            if let Some(next) = next {
+                                let encoded = base64::encode(&next);
+                                self.headers.set_raw("Authorization", format!("NTLM {}", encoded));
+                                done = false;
+                            }
                         }
                     }
                     if done {
@@ -231,6 +211,7 @@ impl<T> client::Service for WinAuthClient<T>
     }
 }
 
+#[cfg(windows)]
 #[cfg(test)]
 mod tests {
     extern crate tokio_core;
@@ -242,17 +223,18 @@ mod tests {
     use self::tokio_core::reactor::Core;
     use super::{AuthMethod, WinAuthClient};
 
-    // TODO: setup appveyor and get this to actually work there
     #[test]
     fn basic_test() {
         let mut core = Core::new().unwrap();
         let client = Client::new(&core.handle());
         let wrapped = WinAuthClient::new(client, AuthMethod::SSPI_SSO);
-        let req = Request::new(Method::Get, "http://localhost/stuff/index.html".parse().unwrap());
-        let work = wrapped.call(req).map(|res| {
+        let req = Request::new(Method::Get, "http://localhost/index.html".parse().unwrap());
+        let work = wrapped.call(req).and_then(|res| {
             println!("Response: {}", res.status());
-            println!("{:?}", str::from_utf8(res.body().concat2().wait().unwrap().as_ref()));
+            res.body().concat2()
         });
-        core.run(work).unwrap();
+        let res = core.run(work).unwrap();
+        let body = str::from_utf8(res.as_ref());
+        assert_eq!(body, Ok("hello world"));
     }
 }

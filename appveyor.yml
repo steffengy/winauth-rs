@@ -14,8 +14,18 @@ install:
   - SET PATH=%PATH%;C:\MinGW\bin
   - rustc -V
   - cargo -V
+  - mkdir c:\test
+  - ps: |
+      "hello world" | Out-File -encoding ascii c:\test\index.html -NoNewline
+      Import-Module WebAdministration
+      New-Item iis:\Sites\TestSite -bindings @{protocol="http";bindingInformation=":80:"} -physicalPath c:\test
+      Set-WebConfigurationProperty -filter /system.webServer/security/authentication/windowsAuthentication -name enabled -value true -PSPath IIS:\ -Location TestSite
+      Set-WebConfigurationProperty -filter /system.webServer/security/authentication/anonymousAuthentication -name enabled -value false -PSPath IIS:\ -Location TestSite
+      Start-Service W3SVC
+      Stop-Website "Default Web Site"
+      Start-Website TestSite
 
 build: false
 
 test_script:
-  - cargo test --target %TARGET% -p winauth
+  - cargo test --target %TARGET% --all
