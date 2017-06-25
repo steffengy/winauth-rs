@@ -443,6 +443,7 @@ impl ChallengeMessage {
 }
 
 /// 2.2.1.3
+#[derive(Debug)]
 struct AuthenticateMessage<'a> {
     /// The name of the (local) workstation (running this code)
     /// used by the server to determine if it can perform local auth.
@@ -542,15 +543,7 @@ impl<'a> AuthenticateMessage<'a> {
         bytes.set_position(bak);
 
         // write negotiate flags
-        let (remove, insert) = match self.domain {
-            None => (NTLMSSP_TARGET_TYPE_DOMAIN, NTLMSSP_TARGET_TYPE_SERVER),
-            Some(_) =>  (NTLMSSP_TARGET_TYPE_SERVER, NTLMSSP_TARGET_TYPE_DOMAIN),
-        };
-        let mut flags = self.negotiate_flags.clone();
-        flags.remove(remove);
-        flags.insert(insert);
-
-        try!(bytes.write_u32::<LittleEndian>(flags.bits()));
+        try!(bytes.write_u32::<LittleEndian>(self.negotiate_flags.bits()));
 
         try!(bytes.write_u64::<LittleEndian>(0));
         assert_eq!(bytes.position(), 72);
@@ -882,10 +875,20 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
 
 #[cfg(test)]
 mod tests {
+    use super::NtlmV2ClientBuilder;
     use super::ntowfv2;
 
     #[test]
     fn test_ntowfv2() {
         assert_eq!(ntowfv2("User", "Password", "Domain"), vec![0x0c, 0x86, 0x8a, 0x40, 0x3b, 0xfd, 0x7a, 0x93, 0xa3, 0x00, 0x1e, 0xf2, 0x2e, 0xf0, 0x2e, 0x3f]);
+    }
+
+    #[test]
+    fn test_md5_gss_channel_bindings_struct() {
+        let bindings = b"\x74\x6c\x73\x2d\x73\x65\x72\x76\x65\x72\x2d\x65\x6e\x64\x2d\x70\x6f\x69\x6e\x74\x3a\xea\x05\xfe\xfe\xcc\x6b\x0b\xd5\x71\xdb\xbc\x5b\xaa\x3e\xd4\x53\x86\xd0\x44\x68\x35\xf7\xb7\x4c\x85\x62\x1b\x99\x83\x47\x5f\x95";
+        let expect = b"\x65\x86\xE9\x9D\x81\xC2\xFC\x98\x4E\x47\x17\x2F\xD4\xDD\x03\x10";
+
+        let builder = NtlmV2ClientBuilder::new();
+        assert_eq!(&builder.channel_bindings(bindings).channel_bindings.unwrap() as &[u8], expect);
     }
 }

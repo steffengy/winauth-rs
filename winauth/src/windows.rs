@@ -138,19 +138,12 @@ impl NextBytes for NtlmSspi {
                 (ctx.as_mut().unwrap() as *mut _, ptr::null_mut())
             };
 
-            let has_in_bytes = in_bytes.is_some();
             let mut inbuf = [secbuf(winapi::SECBUFFER_EMPTY, None), 
                              secbuf(winapi::SECBUFFER_TOKEN, in_bytes.as_ref().map(|x| x.as_ref()))];
             if let Some(ref binding) = self.builder.channel_bindings {
                 inbuf[0] = secbuf(winapi::SECBUFFER_CHANNEL_BINDINGS, Some(binding));
             }
             let mut inbuf_desc = secbuf_desc(&mut inbuf);
-
-            let inbuf_ptr = if has_in_bytes {
-                &mut inbuf_desc as *mut _
-            } else {
-                ptr::null_mut()
-            };
 
             let inbuf_ptr = &mut inbuf_desc as *mut _;
 
@@ -165,7 +158,7 @@ impl NextBytes for NtlmSspi {
                                                     target_name_ptr,
                                                     INIT_REQUEST_FLAGS,
                                                     0,
-                                                    winapi::SECURITY_NETWORK_DREP,
+                                                    winapi::SECURITY_NATIVE_DREP,
                                                     inbuf_ptr,
                                                     0,
                                                     ctx_ptr,
@@ -177,7 +170,7 @@ impl NextBytes for NtlmSspi {
                                                ctx_ptr_in,
                                                inbuf_ptr,
                                                ACCEPT_REQUEST_FLAGS,
-                                               winapi::SECURITY_NETWORK_DREP,
+                                               winapi::SECURITY_NATIVE_DREP,
                                                ctx_ptr,
                                                &mut outbuf_desc,
                                                &mut attrs,
@@ -249,6 +242,11 @@ mod tests {
         assert!(server.next_bytes(Some(&authenticate_bytes)).unwrap().is_none());
     }
 
+    // To properly test channel bindings you need multiple machines, since:
+    // a) LSA doesn't allow loopback trusted connections (allegedely)
+    // b) winapi<->winapi uses a same-machine shortcut, when available
+    // c) debugging is annoying (TLS decryption, which doesnt work with ECDHE ciphers
+    //    --> disable TLS 1.2 etc.)
     #[test]
     fn test_ntlm_channel_bindings_winapi_server() {
         let dbg_bindings = b"\x74\x6c\x73\x2d\x73\x65\x72\x76\x65\x72\x2d\x65\x6e\x64\x2d\x70\x6f\x69\x6e\x74\x3a\xea\x05\xfe\xfe\xcc\x6b\x0b\xd5\x71\xdb\xbc\x5b\xaa\x3e\xd4\x53\x86\xd0\x44\x68\x35\xf7\xb7\x4c\x85\x62\x1b\x99\x83\x47\x5f\x95";
