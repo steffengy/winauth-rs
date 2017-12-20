@@ -1,37 +1,40 @@
 //! Windows-Native NTLM functionalities (including SSO capabilities)
 //!
 //! This is mainly used to verify our implementation
-extern crate kernel32;
-extern crate secur32;
 extern crate winapi;
 
 use std::io;
 use std::mem;
 use std::ptr;
 use std::slice;
+
+use self::winapi::ctypes;
+use self::winapi::shared::sspi;
+use self::winapi::shared::winerror;
+
 use NextBytes;
 
 static NTLM_PROVIDER: &'static [u8] = b"NTLM\0";
 
-const INIT_REQUEST_FLAGS: winapi::c_ulong =
-    winapi::ISC_REQ_CONFIDENTIALITY |
-    winapi::ISC_REQ_INTEGRITY |
-    winapi::ISC_REQ_REPLAY_DETECT |
-    winapi::ISC_REQ_SEQUENCE_DETECT |
-    winapi::ISC_REQ_CONNECTION |
-    winapi::ISC_REQ_DELEGATE |
-    winapi::ISC_REQ_USE_SESSION_KEY |
-    winapi::ISC_REQ_ALLOCATE_MEMORY;
+const INIT_REQUEST_FLAGS: ctypes::c_ulong =
+    sspi::ISC_REQ_CONFIDENTIALITY |
+    sspi::ISC_REQ_INTEGRITY |
+    sspi::ISC_REQ_REPLAY_DETECT |
+    sspi::ISC_REQ_SEQUENCE_DETECT |
+    sspi::ISC_REQ_CONNECTION |
+    sspi::ISC_REQ_DELEGATE |
+    sspi::ISC_REQ_USE_SESSION_KEY |
+    sspi::ISC_REQ_ALLOCATE_MEMORY;
 
-const ACCEPT_REQUEST_FLAGS: winapi::c_ulong =
-    winapi::ASC_REQ_CONFIDENTIALITY |
-    winapi::ASC_REQ_INTEGRITY |
-    winapi::ASC_REQ_REPLAY_DETECT |
-    winapi::ASC_REQ_SEQUENCE_DETECT |
-    winapi::ASC_REQ_CONNECTION |
-    winapi::ASC_REQ_DELEGATE |
-    winapi::ASC_REQ_USE_SESSION_KEY |
-    winapi::ASC_REQ_ALLOCATE_MEMORY;
+const ACCEPT_REQUEST_FLAGS: ctypes::c_ulong =
+    sspi::ASC_REQ_CONFIDENTIALITY |
+    sspi::ASC_REQ_INTEGRITY |
+    sspi::ASC_REQ_REPLAY_DETECT |
+    sspi::ASC_REQ_SEQUENCE_DETECT |
+    sspi::ASC_REQ_CONNECTION |
+    sspi::ASC_REQ_DELEGATE |
+    sspi::ASC_REQ_USE_SESSION_KEY |
+    sspi::ASC_REQ_ALLOCATE_MEMORY;
 
 /// Builder for `NtlmSspi` which provides configuration for it
 pub struct NtlmSspiBuilder {
@@ -96,22 +99,22 @@ impl NtlmSspi {
         unsafe {
             let mut handle = mem::zeroed();
             let direction = if builder.outbound {
-                winapi::SECPKG_CRED_OUTBOUND
+                sspi::SECPKG_CRED_OUTBOUND
             } else {
-                winapi::SECPKG_CRED_INBOUND
+                sspi::SECPKG_CRED_INBOUND
             };
             // accquire the initial token (negotiate for either kerberos or NTLM)
-            let ret = secur32::AcquireCredentialsHandleA(ptr::null_mut(),
-                                                         NTLM_PROVIDER.as_ptr() as *mut i8,
-                                                         direction,
-                                                         ptr::null_mut(),
-                                                         ptr::null_mut(),
-                                                         None,
-                                                         ptr::null_mut(),
-                                                         &mut handle,
-                                                         ptr::null_mut());
+            let ret = sspi::AcquireCredentialsHandleA(ptr::null_mut(),
+                                                      NTLM_PROVIDER.as_ptr() as *mut i8,
+                                                      direction,
+                                                      ptr::null_mut(),
+                                                      ptr::null_mut(),
+                                                      None,
+                                                      ptr::null_mut(),
+                                                      &mut handle,
+                                                      ptr::null_mut());
             let cred = match ret {
-                winapi::SEC_E_OK => NtlmCred(handle),
+                winerror::SEC_E_OK => NtlmCred(handle),
                 err => return Err(io::Error::from_raw_os_error(err as i32)),
             };
 
@@ -138,54 +141,54 @@ impl NextBytes for NtlmSspi {
                 (ctx.as_mut().unwrap() as *mut _, ptr::null_mut())
             };
 
-            let mut inbuf = [secbuf(winapi::SECBUFFER_EMPTY, None), 
-                             secbuf(winapi::SECBUFFER_TOKEN, in_bytes.as_ref().map(|x| x.as_ref()))];
+            let mut inbuf = [secbuf(sspi::SECBUFFER_EMPTY, None), 
+                             secbuf(sspi::SECBUFFER_TOKEN, in_bytes.as_ref().map(|x| x.as_ref()))];
             if let Some(ref binding) = self.builder.channel_bindings {
-                inbuf[0] = secbuf(winapi::SECBUFFER_CHANNEL_BINDINGS, Some(binding));
+                inbuf[0] = secbuf(sspi::SECBUFFER_CHANNEL_BINDINGS, Some(binding));
             }
             let mut inbuf_desc = secbuf_desc(&mut inbuf);
 
             let inbuf_ptr = &mut inbuf_desc as *mut _;
 
-            let mut outbuf = [secbuf(winapi::SECBUFFER_TOKEN, None)];
+            let mut outbuf = [secbuf(sspi::SECBUFFER_TOKEN, None)];
             let mut outbuf_desc = secbuf_desc(&mut outbuf);
             let target_name_ptr = self.builder.target_spn.as_mut().map(|x| x.as_mut_ptr()).unwrap_or(ptr::null_mut());
             // create a token message
             let mut attrs = 0u32;
             let ret = if self.builder.outbound {
-                secur32::InitializeSecurityContextW(&mut self.cred.0,
-                                                    ctx_ptr_in,
-                                                    target_name_ptr,
-                                                    INIT_REQUEST_FLAGS,
-                                                    0,
-                                                    winapi::SECURITY_NATIVE_DREP,
-                                                    inbuf_ptr,
-                                                    0,
-                                                    ctx_ptr,
-                                                    &mut outbuf_desc,
-                                                    &mut attrs,
-                                                    ptr::null_mut())
+                sspi::InitializeSecurityContextW(&mut self.cred.0,
+                                                 ctx_ptr_in,
+                                                 target_name_ptr,
+                                                 INIT_REQUEST_FLAGS,
+                                                 0,
+                                                 sspi::SECURITY_NATIVE_DREP,
+                                                 inbuf_ptr,
+                                                 0,
+                                                 ctx_ptr,
+                                                 &mut outbuf_desc,
+                                                 &mut attrs,
+                                                 ptr::null_mut())
             } else {
-                secur32::AcceptSecurityContext(&mut self.cred.0,
-                                               ctx_ptr_in,
-                                               inbuf_ptr,
-                                               ACCEPT_REQUEST_FLAGS,
-                                               winapi::SECURITY_NATIVE_DREP,
-                                               ctx_ptr,
-                                               &mut outbuf_desc,
-                                               &mut attrs,
-                                               ptr::null_mut())
+                sspi::AcceptSecurityContext(&mut self.cred.0,
+                                            ctx_ptr_in,
+                                            inbuf_ptr,
+                                            ACCEPT_REQUEST_FLAGS,
+                                            sspi::SECURITY_NATIVE_DREP,
+                                            ctx_ptr,
+                                            &mut outbuf_desc,
+                                            &mut attrs,
+                                            ptr::null_mut())
             };
 
             match ret {
-                winapi::SEC_E_OK | winapi::SEC_I_CONTINUE_NEEDED => {
+                winerror::SEC_E_OK | winerror::SEC_I_CONTINUE_NEEDED => {
                     if let Some(new_ctx) = ctx {
                         self.ctx = Some(SecurityContext(new_ctx));
                     }
                     if outbuf[0].cbBuffer > 0 {
                         Ok(Some(ContextBuffer(outbuf[0]).as_ref().to_vec()))
                     } else {
-                        assert_eq!(ret, winapi::SEC_E_OK);
+                        assert_eq!(ret, winerror::SEC_E_OK);
                         Ok(None)
                     }
                 },
@@ -287,33 +290,33 @@ mod tests {
 
 
 // some helper stuff imported frm schannel.rs
-struct NtlmCred(winapi::CredHandle);
+struct NtlmCred(sspi::CredHandle);
 
 impl Drop for NtlmCred {
     fn drop(&mut self) {
         unsafe {
-            secur32::FreeCredentialsHandle(&mut self.0);
+            sspi::FreeCredentialsHandle(&mut self.0);
         }
     }
 }
 
-struct SecurityContext(winapi::CtxtHandle);
+struct SecurityContext(sspi::CtxtHandle);
 
 impl Drop for SecurityContext {
     fn drop(&mut self) {
         unsafe {
-            secur32::DeleteSecurityContext(&mut self.0);
+            sspi::DeleteSecurityContext(&mut self.0);
         }
     }
 }
 
 /// A managed windows-allocated buffer, that dereferences into &[u8]
-pub struct ContextBuffer(winapi::SecBuffer);
+pub struct ContextBuffer(sspi::SecBuffer);
 
 impl Drop for ContextBuffer {
     fn drop(&mut self) {
         unsafe {
-            secur32::FreeContextBuffer(self.0.pvBuffer);
+            sspi::FreeContextBuffer(self.0.pvBuffer);
         }
     }
 }
@@ -325,23 +328,23 @@ impl AsRef<[u8]> for ContextBuffer {
 }
 
 
-unsafe fn secbuf(buftype: winapi::c_ulong,
-                    bytes: Option<&[u8]>) -> winapi::SecBuffer {
+unsafe fn secbuf(buftype: ctypes::c_ulong,
+                    bytes: Option<&[u8]>) -> sspi::SecBuffer {
     let (ptr, len) = match bytes {
-        Some(bytes) => (bytes.as_ptr(), bytes.len() as winapi::c_ulong),
+        Some(bytes) => (bytes.as_ptr(), bytes.len() as ctypes::c_ulong),
         None => (ptr::null(), 0),
     };
-    winapi::SecBuffer {
+    sspi::SecBuffer {
         BufferType: buftype,
         cbBuffer: len,
-        pvBuffer: ptr as *mut winapi::c_void,
+        pvBuffer: ptr as *mut ctypes::c_void,
     }
 }
 
-unsafe fn secbuf_desc(bufs: &mut [winapi::SecBuffer]) -> winapi::SecBufferDesc {
-    winapi::SecBufferDesc {
-        ulVersion: winapi::SECBUFFER_VERSION,
-        cBuffers: bufs.len() as winapi::c_ulong,
+unsafe fn secbuf_desc(bufs: &mut [sspi::SecBuffer]) -> sspi::SecBufferDesc {
+    sspi::SecBufferDesc {
+        ulVersion: sspi::SECBUFFER_VERSION,
+        cBuffers: bufs.len() as ctypes::c_ulong,
         pBuffers: bufs.as_mut_ptr(),
     }
 }

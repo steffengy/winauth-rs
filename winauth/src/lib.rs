@@ -73,92 +73,92 @@ macro_rules! uint_to_enum {
 
 /// as documented in 2.2.2.5 NEGOTIATE
 bitflags! {
-    flags NegotiateFlags: u32 {
+    struct NegotiateFlags: u32 {
         /// W-bit
         /// requests 56-bit encryption
-        const NTLMSSP_NEGOTIATE_56 = 1<<31,
+        const NTLMSSP_NEGOTIATE_56 = 1<<31;
 
         /// V-bit
         /// requests explicit key exchange
-        const NTLMSSP_NEGOTIATE_KEY_EXCH = 1<<30,
+        const NTLMSSP_NEGOTIATE_KEY_EXCH = 1<<30;
 
         /// U-bit
         /// requests an 128 bit session key
-        const NTLMSSP_NEGOTIATE_128 = 1<<29,
+        const NTLMSSP_NEGOTIATE_128 = 1<<29;
         // r1,r2,r3 (unused)
         
         /// T-bit
         /// requests the protocol version number
-        const NTLMSSP_NEGOTIATE_VERSION = 1<<25,
+        const NTLMSSP_NEGOTIATE_VERSION = 1<<25;
         // r4
 
         /// S-bit
-        const NTLMSSP_NEGOTIATE_TARGET_INFO = 1<<23,
+        const NTLMSSP_NEGOTIATE_TARGET_INFO = 1<<23;
 
         /// R-bit
         /// requests LMOW usage
-        const NTLMSSP_REQUEST_NON_NT_SESSION_KEY = 1<<22,
+        const NTLMSSP_REQUEST_NON_NT_SESSION_KEY = 1<<22;
         //r5
 
         /// Q-bit
         /// request identity level token
-        const NTLMSSP_NEGOTIATE_IDENTIFY = 1<<20,
+        const NTLMSSP_NEGOTIATE_IDENTIFY = 1<<20;
 
         /// P-bit
         /// NTLMv2 Session Security
-        const NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY = 1<<19,
+        const NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY = 1<<19;
         //r6
 
         /// O-bit
-        const NTLMSSP_TARGET_TYPE_SERVER = 1<<17,
+        const NTLMSSP_TARGET_TYPE_SERVER = 1<<17;
 
         /// N-bit
-        const NTLMSSP_TARGET_TYPE_DOMAIN = 1<<16,
+        const NTLMSSP_TARGET_TYPE_DOMAIN = 1<<16;
 
         /// M-bit
         /// requests a signature block
-        const NTLMSSP_NEGOTIATE_ALWAYS_SIGN = 1<<15,
+        const NTLMSSP_NEGOTIATE_ALWAYS_SIGN = 1<<15;
         // r7 (Negotiate Local Call, 1 << 14)
 
         /// L-bit
-        const NTLMSSP_NEGOTIATE_OEM_WORKSTATION_SUPPLIED = 1<<13,
+        const NTLMSSP_NEGOTIATE_OEM_WORKSTATION_SUPPLIED = 1<<13;
 
         /// K-bit
-        const NTLMSSP_NEGOTIATE_OEM_DOMAIN_SUPPLIED = 1<<12,
+        const NTLMSSP_NEGOTIATE_OEM_DOMAIN_SUPPLIED = 1<<12;
 
         /// J-bit
-        const NTLMSSP_ANONYMOUS_CONNECTION = 1<<11,
+        const NTLMSSP_ANONYMOUS_CONNECTION = 1<<11;
         // r8
 
         /// H-bit
         /// NTLMv1 Session Security, deprecated, insecure and not supported by us
-        const NTLMSSP_NEGOTIATE_NTLM = 1<<9,
+        const NTLMSSP_NEGOTIATE_NTLM = 1<<9;
         // r9
 
         /// G-bit
         /// LM Session Security, deprecated, insecure and not supported by us
-        const NTLMSSP_NEGOTIATE_LM_KEY = 1<<7,
+        const NTLMSSP_NEGOTIATE_LM_KEY = 1<<7;
 
         /// F-bit
         /// requests connectionless auth
-        const NTLMSSP_NEGOTIATE_DATAGRAM = 1<<6,
+        const NTLMSSP_NEGOTIATE_DATAGRAM = 1<<6;
 
         /// E-bit
         /// session key negotiation with message confidentiality
-        const NTLMSSP_NEGOTIATE_SEAL = 1<<5,
+        const NTLMSSP_NEGOTIATE_SEAL = 1<<5;
 
         /// D-bit
-        const NTLMSSP_NEGOTIATE_SIGN = 1<<4,
+        const NTLMSSP_NEGOTIATE_SIGN = 1<<4;
         // r10
 
         /// C-bit
-        const NTLMSSP_REQUEST_TARGET = 1<<2,
+        const NTLMSSP_REQUEST_TARGET = 1<<2;
 
         /// B-bit
-        const NTLM_NEGOTIATE_OEM = 1<<1,
+        const NTLM_NEGOTIATE_OEM = 1<<1;
 
         /// A-bit
-        const NTLMSSP_NEGOTIATE_UNICODE = 1<<0,
+        const NTLMSSP_NEGOTIATE_UNICODE = 1<<0;
     }
 }
 
@@ -176,8 +176,8 @@ impl NegotiateMessage {
 
         // make sure the negotiate flags do not contain workstation or domain flags
         let mut flags = self.negotiate_flags;
-        flags.remove(NTLMSSP_TARGET_TYPE_SERVER);
-        flags.remove(NTLMSSP_TARGET_TYPE_DOMAIN);
+        flags.remove(NegotiateFlags::NTLMSSP_TARGET_TYPE_SERVER);
+        flags.remove(NegotiateFlags::NTLMSSP_TARGET_TYPE_DOMAIN);
 
         try!(bytes.write_u32::<LittleEndian>(flags.bits()));
 
@@ -210,10 +210,10 @@ uint_to_enum!(AvId, MsvAvEOL, MsvAvNbComputerName, MsvAvNbDomainName, MsvAvDnsCo
     MsvAvFlags, MsvAvTimestamp, MsvAvSingleHost, MsvAvTargetName, MsvChannelBindings);
 
 bitflags! {
-    flags AvFlags: u32 {
-        const AVF_ACCOUNT_AUTH_CONSTRAINED = 0x01,
-        const AVF_MIC_FIELD_POPULATED = 0x02,
-        const AVF_TARGET_SPN_UNTRUSTED_ORIGIN = 0x04,
+    struct AvFlags: u32 {
+        const AVF_ACCOUNT_AUTH_CONSTRAINED = 0x01;
+        const AVF_MIC_FIELD_POPULATED = 0x02;
+        const AVF_TARGET_SPN_UNTRUSTED_ORIGIN = 0x04;
     }
 }
 
@@ -389,7 +389,7 @@ impl ChallengeMessage {
         }
         let target_info_offset = try!(r.read_u32::<LittleEndian>());
 
-        if negotiate_flags.contains(NTLMSSP_NEGOTIATE_VERSION) {
+        if negotiate_flags.contains(NegotiateFlags::NTLMSSP_NEGOTIATE_VERSION) {
             payload_offset += 8;
             // read version, only used for debug
             try!(r.read_exact(&mut sig_bytes));
@@ -765,13 +765,13 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
     /// This returns the next bytes which have to be sent to the server.  
     /// The authentication is complete, when this returns `None`
     fn next_bytes(&mut self, bytes: Option<&[u8]>) -> io::Result<Option<Vec<u8>>> {
-        let needed_flags = NTLMSSP_NEGOTIATE_TARGET_INFO | 
-                         NTLMSSP_NEGOTIATE_128 | 
-                         NTLMSSP_NEGOTIATE_KEY_EXCH | 
-                         NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY | 
-                         NTLMSSP_NEGOTIATE_ALWAYS_SIGN |
-                         NTLMSSP_NEGOTIATE_SEAL |
-                         NTLMSSP_NEGOTIATE_UNICODE;
+        let needed_flags = NegotiateFlags::NTLMSSP_NEGOTIATE_TARGET_INFO | 
+                           NegotiateFlags::NTLMSSP_NEGOTIATE_128 | 
+                           NegotiateFlags::NTLMSSP_NEGOTIATE_KEY_EXCH | 
+                           NegotiateFlags::NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY | 
+                           NegotiateFlags::NTLMSSP_NEGOTIATE_ALWAYS_SIGN |
+                           NegotiateFlags::NTLMSSP_NEGOTIATE_SEAL |
+                           NegotiateFlags::NTLMSSP_NEGOTIATE_UNICODE;
         match self.state {
             NtlmV2ClientState::Initial => {
                 if bytes.is_some() {
@@ -803,7 +803,7 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                 let mut has_flags = false;
                 for item in &mut challenge_msg.av_pairs {
                     if let AvItem::Flags(ref mut flags) = *item {
-                        flags.insert(AVF_MIC_FIELD_POPULATED);
+                        flags.insert(AvFlags::AVF_MIC_FIELD_POPULATED);
                         has_flags = true;
                     }
                     if let AvItem::AvTargetName(_) = *item {
@@ -811,7 +811,7 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                     }
                 }
                 if !has_flags {
-                    challenge_msg.av_pairs.push(AvItem::Flags(AVF_MIC_FIELD_POPULATED));
+                    challenge_msg.av_pairs.push(AvItem::Flags(AvFlags::AVF_MIC_FIELD_POPULATED));
                 }
                 if let Some(channel_bindings) = self.channel_bindings {
                     challenge_msg.av_pairs.push(AvItem::ChannelBindings(channel_bindings));

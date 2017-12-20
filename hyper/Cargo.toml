@@ -1,6 +1,6 @@
 [package]
 name = "hyper-winauth"
-version = "0.0.2"
+version = "0.0.3"
 authors = ["Steffen Butzer <steffen.butzer@outlook.com>"]
 keywords = ["ntlm", "sspi", "winauth"]
 repository = "https://github.com/steffengy/winauth-rs"
