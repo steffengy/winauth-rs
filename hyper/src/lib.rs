@@ -153,17 +153,20 @@ impl<T> Future for WinAuthFuture<T>
                             // check if this is the initial request (not containing any bytes)
                             if elem.is_none() {
                                 assert!(self.winauth.is_none());
-                                let winauth = match self.inner.auth {
-                                    #[cfg(windows)]
-                                    AuthMethod::SSPI_SSO => {
-                                        Box::new(winauth::windows::NtlmSspiBuilder::new().build()?)
-                                    }
-                                    AuthMethod::NTLMv2(_, _) => {
-                                        // Box::new(winauth::NtlmV2ClientBuilder::build(
-                                        unimplemented!()
-                                    }
-                                };
-                                self.winauth = Some(winauth);
+                                #[allow(unreachable_code, unused_variables)]
+                                {
+                                    let winauth = match self.inner.auth {
+                                        #[cfg(windows)]
+                                        AuthMethod::SSPI_SSO => {
+                                            Box::new(winauth::windows::NtlmSspiBuilder::new().build()?)
+                                        }
+                                        AuthMethod::NTLMv2(_, _) => {
+                                            // Box::new(winauth::NtlmV2ClientBuilder::build(
+                                            unimplemented!()
+                                        }
+                                    };
+                                    self.winauth = Some(winauth);
+                                }
                             }
                             let next = self.winauth.as_mut().unwrap()
                                            .next_bytes(elem.as_ref().map(|x| &**x))?;

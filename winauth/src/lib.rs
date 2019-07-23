@@ -18,7 +18,7 @@ use std::env;
 use std::io::{self, Cursor, Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use byteorder::{ByteOrder, WriteBytesExt, ReadBytesExt, LittleEndian};
-use rand::Rng;
+use rand::prelude::*;
 
 mod hmac;
 mod md4;
@@ -71,8 +71,8 @@ macro_rules! uint_to_enum {
     }
 }
 
-/// as documented in 2.2.2.5 NEGOTIATE
 bitflags! {
+    /// as documented in 2.2.2.5 NEGOTIATE
     struct NegotiateFlags: u32 {
         /// W-bit
         /// requests 56-bit encryption
@@ -599,7 +599,7 @@ impl<'a> Ntlmv2Response<'a> {
         };
         try!(w.write_u64::<LittleEndian>(nano_seconds));
         let mut client_challenge = [0u8; 8];
-        rand::thread_rng().fill_bytes(&mut client_challenge);
+        thread_rng().fill_bytes(&mut client_challenge);
         try!(w.write_all(&client_challenge));
         try!(w.write_u32::<LittleEndian>(0)); //reserved3
         try!(w.encode_av_pairs(&self.av_pairs));
@@ -623,7 +623,7 @@ impl<'a> Ntlmv2Response<'a> {
         let session_base_key = Md5::hmac(&response_key_nt, &nt_proof_str);
         // ExportedSessionKey := NONCE(16)
         let mut exported_session_key = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut exported_session_key);
+        thread_rng().fill_bytes(&mut exported_session_key);
         let encrypted_random_session_key = rc4::rc4(&session_base_key, &exported_session_key);
 
         let mut ntlmv2_response = nt_proof_str;
