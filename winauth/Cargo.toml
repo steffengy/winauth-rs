@@ -11,8 +11,8 @@ keywords = ["ntlm", "sspi", "winauth"]
 [dependencies]
 bitflags = "1.0"
 byteorder = "1.2.0"
-rand = "0.4"
-md5 = "0.3.3"
+rand = "0.7"
+md5 = "0.6.1"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winerror", "sspi"] }
