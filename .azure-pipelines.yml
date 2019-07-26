@@ -1,0 +1,62 @@
+trigger:
+  - master
+  - ci_test
+
+variables:
+  testPassword: Testpw123!+
+
+jobs:
+- template: ci/azure-check-minrust.yml
+  parameters:
+    name: minrust
+    rust_version: 1.34.0
+
+- job: Windows
+  strategy:
+    matrix:
+      Windows2019Stable:
+        vmImage: windows-2019
+        rustcVersion: stable-i686-pc-windows-msvc
+      Windows2019Nightly:
+        vmImage: windows-2019
+        rustcVersion: nightly
+      Windows2016Nightly:
+        vmImage: vs2017-win2016
+        rustcVersion: nightly
+      Windows2012R2Nightly:
+        vmImage: vs2015-win2012r2
+        rustcVersion: nightly
+  pool:
+    vmImage: $(vmImage)
+  variables:
+    RUST_BACKTRACE: full
+
+  steps:
+  - template: ci/azure-install-rust.yml
+    parameters:
+      rust_version: $(rustcVersion)
+  - script: net user %USERNAME% $(testPassword)
+  - script: cargo test --package winauth
+    displayName: cargo test --package winauth
+    env:
+      TEST_PW: $(testPassword)
+
+- job: Linux
+  strategy:
+    matrix:
+      LinuxStable:
+        vmImage: ubuntu-16.04
+        rustcVersion: stable
+      LinuxNightly:
+        vmImage: ubuntu-16.04
+        rustcVersion: nightly
+  pool:
+    vmImage: $(vmImage)
+  variables:
+    RUST_BACKTRACE: full
+  steps:
+  - template: ci/azure-install-rust.yml
+    parameters:
+      rust_version: $(rustcVersion)
+  - script: cargo test --package winauth
+    displayName: cargo test --package winauth
