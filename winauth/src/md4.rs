@@ -1,5 +1,5 @@
 ///! lightweight MD4 implementation
-use hmac::Hash;
+use crate::hmac::Hash;
 
 /// derived from the RSA Data Security, Inc. MD4 Message-Digest Algorithm (RFC1320)
 /// https://tools.ietf.org/html/rfc1320
@@ -22,10 +22,11 @@ const S32: u32 = 9;
 const S33: u32 = 11;
 const S34: u32 = 15;
 
-static PADDING: &'static [u8; 64] = &[0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-                           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+static PADDING: &'static [u8; 64] = &[
+    0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0,
+];
 
 impl Hash for Md4 {
     #[inline]
@@ -41,26 +42,29 @@ impl Hash for Md4 {
     }
 
     fn hash_size() -> usize {
-        16        
+        16
     }
 }
 
 fn encode(output: &mut [u8], input: &[u32]) {
     debug_assert_eq!(output.len() % 4, 0);
     for i in 0..input.len() {
-        let idx = 4*i;
+        let idx = 4 * i;
         output[idx] = (input[i] & 0xff) as u8;
-        output[idx+1] = ((input[i] >> 8) & 0xff) as u8;
-        output[idx+2] = ((input[i] >> 16) & 0xff) as u8;
-        output[idx+3] = ((input[i] >> 24) & 0xff) as u8;
+        output[idx + 1] = ((input[i] >> 8) & 0xff) as u8;
+        output[idx + 2] = ((input[i] >> 16) & 0xff) as u8;
+        output[idx + 3] = ((input[i] >> 24) & 0xff) as u8;
     }
 }
 
 fn decode(output: &mut [u32], bytes: &[u8]) {
     debug_assert_eq!(bytes.len() % 4, 0);
-    for i in 0..(bytes.len()/4) {
-        let idx = 4*i;
-        output[i] = bytes[idx] as u32 | ((bytes[idx+1] as u32) << 8) | ((bytes[idx+2] as u32) << 16) | ((bytes[idx+3] as u32) << 24);
+    for i in 0..(bytes.len() / 4) {
+        let idx = 4 * i;
+        output[i] = bytes[idx] as u32
+            | ((bytes[idx + 1] as u32) << 8)
+            | ((bytes[idx + 2] as u32) << 16)
+            | ((bytes[idx + 3] as u32) << 24);
     }
 }
 
@@ -79,12 +83,12 @@ fn G(x: u32, y: u32, z: u32) -> u32 {
 #[allow(non_snake_case)]
 #[inline]
 fn H(x: u32, y: u32, z: u32) -> u32 {
-     ((x) ^ (y) ^ (z))
+    ((x) ^ (y) ^ (z))
 }
 
 macro_rules! FF {
     ($a:expr, $b:expr, $c: expr, $d: expr, $x:expr, $s:expr) => {
-        $a = $a.wrapping_add(F($b, $c, $d).wrapping_add($x)); 
+        $a = $a.wrapping_add(F($b, $c, $d).wrapping_add($x));
         $a = $a.rotate_left($s);
     };
 }
@@ -115,7 +119,7 @@ impl Md4 {
     }
 
     fn update(&mut self, input: &[u8]) {
-        // compute number of bytes mod 64 
+        // compute number of bytes mod 64
         let mut index = ((self.count[0] >> 3) & 0x3f) as usize;
 
         // update number of bits
@@ -130,7 +134,7 @@ impl Md4 {
         // transform as many times as possible
         let mut i = part_len;
         if input.len() >= part_len {
-            self.buffer[index..(index+part_len)].copy_from_slice(&input[..part_len]);
+            self.buffer[index..(index + part_len)].copy_from_slice(&input[..part_len]);
             self.transform(None);
 
             while i + 63 < input.len() {
@@ -144,7 +148,7 @@ impl Md4 {
 
         // buffer the remaining input
         let count = input.len() - i;
-        self.buffer[index..index+count].copy_from_slice(&input[i..i+count]);
+        self.buffer[index..index + count].copy_from_slice(&input[i..i + count]);
     }
 
     fn transform(&mut self, input: Option<&[u8]>) {
@@ -162,59 +166,59 @@ impl Md4 {
         let mut d = self.state[3];
 
         /* Round 1 */
-        FF!(a, b, c, d, x[ 0], S11);         /* 1 */
-        FF!(d, a, b, c, x[ 1], S12);         /* 2 */
-        FF!(c, d, a, b, x[ 2], S13);         /* 3 */
-        FF!(b, c, d, a, x[ 3], S14);         /* 4 */
-        FF!(a, b, c, d, x[ 4], S11);         /* 5 */
-        FF!(d, a, b, c, x[ 5], S12);         /* 6 */
-        FF!(c, d, a, b, x[ 6], S13);         /* 7 */
-        FF!(b, c, d, a, x[ 7], S14);         /* 8 */
-        FF!(a, b, c, d, x[ 8], S11);         /* 9 */
-        FF!(d, a, b, c, x[ 9], S12);         /* 10 */
-        FF!(c, d, a, b, x[10], S13);         /* 11 */
-        FF!(b, c, d, a, x[11], S14);         /* 12 */
-        FF!(a, b, c, d, x[12], S11);         /* 13 */
-        FF!(d, a, b, c, x[13], S12);         /* 14 */
-        FF!(c, d, a, b, x[14], S13);         /* 15 */
-        FF!(b, c, d, a, x[15], S14);         /* 16 */
+        FF!(a, b, c, d, x[0], S11); /* 1 */
+        FF!(d, a, b, c, x[1], S12); /* 2 */
+        FF!(c, d, a, b, x[2], S13); /* 3 */
+        FF!(b, c, d, a, x[3], S14); /* 4 */
+        FF!(a, b, c, d, x[4], S11); /* 5 */
+        FF!(d, a, b, c, x[5], S12); /* 6 */
+        FF!(c, d, a, b, x[6], S13); /* 7 */
+        FF!(b, c, d, a, x[7], S14); /* 8 */
+        FF!(a, b, c, d, x[8], S11); /* 9 */
+        FF!(d, a, b, c, x[9], S12); /* 10 */
+        FF!(c, d, a, b, x[10], S13); /* 11 */
+        FF!(b, c, d, a, x[11], S14); /* 12 */
+        FF!(a, b, c, d, x[12], S11); /* 13 */
+        FF!(d, a, b, c, x[13], S12); /* 14 */
+        FF!(c, d, a, b, x[14], S13); /* 15 */
+        FF!(b, c, d, a, x[15], S14); /* 16 */
 
         /* Round 2 */
-        GG!(a, b, c, d, x[ 0], S21);         /* 17 */
-        GG!(d, a, b, c, x[ 4], S22);         /* 18 */
-        GG!(c, d, a, b, x[ 8], S23);         /* 19 */
-        GG!(b, c, d, a, x[12], S24);         /* 20 */
-        GG!(a, b, c, d, x[ 1], S21);         /* 21 */
-        GG!(d, a, b, c, x[ 5], S22);         /* 22 */
-        GG!(c, d, a, b, x[ 9], S23);         /* 23 */
-        GG!(b, c, d, a, x[13], S24);         /* 24 */
-        GG!(a, b, c, d, x[ 2], S21);         /* 25 */
-        GG!(d, a, b, c, x[ 6], S22);         /* 26 */
-        GG!(c, d, a, b, x[10], S23);         /* 27 */
-        GG!(b, c, d, a, x[14], S24);         /* 28 */
-        GG!(a, b, c, d, x[ 3], S21);         /* 29 */
-        GG!(d, a, b, c, x[ 7], S22);         /* 30 */
-        GG!(c, d, a, b, x[11], S23);         /* 31 */
-        GG!(b, c, d, a, x[15], S24);         /* 32 */
+        GG!(a, b, c, d, x[0], S21); /* 17 */
+        GG!(d, a, b, c, x[4], S22); /* 18 */
+        GG!(c, d, a, b, x[8], S23); /* 19 */
+        GG!(b, c, d, a, x[12], S24); /* 20 */
+        GG!(a, b, c, d, x[1], S21); /* 21 */
+        GG!(d, a, b, c, x[5], S22); /* 22 */
+        GG!(c, d, a, b, x[9], S23); /* 23 */
+        GG!(b, c, d, a, x[13], S24); /* 24 */
+        GG!(a, b, c, d, x[2], S21); /* 25 */
+        GG!(d, a, b, c, x[6], S22); /* 26 */
+        GG!(c, d, a, b, x[10], S23); /* 27 */
+        GG!(b, c, d, a, x[14], S24); /* 28 */
+        GG!(a, b, c, d, x[3], S21); /* 29 */
+        GG!(d, a, b, c, x[7], S22); /* 30 */
+        GG!(c, d, a, b, x[11], S23); /* 31 */
+        GG!(b, c, d, a, x[15], S24); /* 32 */
 
         /* Round 3 */
-        HH!(a, b, c, d, x[ 0], S31);         /* 33 */
-        HH!(d, a, b, c, x[ 8], S32);         /* 34 */
-        HH!(c, d, a, b, x[ 4], S33);         /* 35 */
-        HH!(b, c, d, a, x[12], S34);         /* 36 */
-        HH!(a, b, c, d, x[ 2], S31);         /* 37 */
-        HH!(d, a, b, c, x[10], S32);         /* 38 */
-        HH!(c, d, a, b, x[ 6], S33);         /* 39 */
-        HH!(b, c, d, a, x[14], S34);         /* 40 */
-        HH!(a, b, c, d, x[ 1], S31);         /* 41 */
-        HH!(d, a, b, c, x[ 9], S32);         /* 42 */
-        HH!(c, d, a, b, x[ 5], S33);         /* 43 */
-        HH!(b, c, d, a, x[13], S34);         /* 44 */
-        HH!(a, b, c, d, x[ 3], S31);         /* 45 */
-        HH!(d, a, b, c, x[11], S32);         /* 46 */
-        HH!(c, d, a, b, x[ 7], S33);         /* 47 */
-        HH!(b, c, d, a, x[15], S34);         /* 48 */
-        
+        HH!(a, b, c, d, x[0], S31); /* 33 */
+        HH!(d, a, b, c, x[8], S32); /* 34 */
+        HH!(c, d, a, b, x[4], S33); /* 35 */
+        HH!(b, c, d, a, x[12], S34); /* 36 */
+        HH!(a, b, c, d, x[2], S31); /* 37 */
+        HH!(d, a, b, c, x[10], S32); /* 38 */
+        HH!(c, d, a, b, x[6], S33); /* 39 */
+        HH!(b, c, d, a, x[14], S34); /* 40 */
+        HH!(a, b, c, d, x[1], S31); /* 41 */
+        HH!(d, a, b, c, x[9], S32); /* 42 */
+        HH!(c, d, a, b, x[5], S33); /* 43 */
+        HH!(b, c, d, a, x[13], S34); /* 44 */
+        HH!(a, b, c, d, x[3], S31); /* 45 */
+        HH!(d, a, b, c, x[11], S32); /* 46 */
+        HH!(c, d, a, b, x[7], S33); /* 47 */
+        HH!(b, c, d, a, x[15], S34); /* 48 */
+
         self.state[0] = self.state[0].wrapping_add(a);
         self.state[1] = self.state[1].wrapping_add(b);
         self.state[2] = self.state[2].wrapping_add(c);
@@ -229,11 +233,7 @@ impl Md4 {
 
         // pad out to 56 mod 64
         let index = (self.count[0] >> 3) & 0x3f;
-        let pad_len = if index < 56 {
-            56 - index
-        } else {
-            120 - index
-        } as usize;
+        let pad_len = if index < 56 { 56 - index } else { 120 - index } as usize;
         self.update(&PADDING[..pad_len]);
 
         // append length (before padding)
@@ -248,16 +248,28 @@ impl Md4 {
 
 #[cfg(test)]
 mod tests {
-    use hmac::Hash;
     use super::Md4;
+    use crate::hmac::Hash;
 
     #[test]
     fn test_md4_fox() {
-        assert_eq!(Md4::hash(b"The quick brown fox jumps over the lazy dog"), vec![0x1b, 0xee, 0x69, 0xa4, 0x6b, 0xa8, 0x11, 0x18, 0x5c, 0x19, 0x47, 0x62, 0xab, 0xae, 0xae, 0x90]);
+        assert_eq!(
+            Md4::hash(b"The quick brown fox jumps over the lazy dog"),
+            vec![
+                0x1b, 0xee, 0x69, 0xa4, 0x6b, 0xa8, 0x11, 0x18, 0x5c, 0x19, 0x47, 0x62, 0xab, 0xae,
+                0xae, 0x90
+            ]
+        );
     }
 
     #[test]
-    fn test_md4_empty(){
-        assert_eq!(Md4::hash(b""), vec![0x31, 0xd6, 0xcf, 0xe0, 0xd1, 0x6a, 0xe9, 0x31, 0xb7, 0x3c, 0x59, 0xd7, 0xe0, 0xc0, 0x89, 0xc0]);
+    fn test_md4_empty() {
+        assert_eq!(
+            Md4::hash(b""),
+            vec![
+                0x31, 0xd6, 0xcf, 0xe0, 0xd1, 0x6a, 0xe9, 0x31, 0xb7, 0x3c, 0x59, 0xd7, 0xe0, 0xc0,
+                0x89, 0xc0
+            ]
+        );
     }
 }

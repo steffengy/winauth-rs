@@ -7,17 +7,14 @@
 //!
 //! [Channel Bindings](http://blogs.msdn.com/b/openspecification/archive/2013/03/26/ntlm-and-channel-binding-hash-aka-exteneded-protection-for-authentication.aspx)
 //! are supported in this implementation and in the windows bindings
-#[macro_use]
-extern crate bitflags;
-extern crate byteorder;
-extern crate rand;
-extern crate md5;
-
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::env;
 use std::io::{self, Cursor, Read, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
-use byteorder::{ByteOrder, WriteBytesExt, ReadBytesExt, LittleEndian};
+
+use bitflags::bitflags;
+use byteorder::{ByteOrder, LittleEndian, ReadBytesExt, WriteBytesExt};
 use rand::prelude::*;
 
 mod hmac;
@@ -27,14 +24,17 @@ mod rc4;
 #[cfg(windows)]
 pub mod windows;
 
-use md4::Md4;
-use hmac::{Hash, Md5};
+use crate::hmac::{Hash, Md5};
+use crate::md4::Md4;
 
 static SIGNATURE: &'static [u8] = b"NTLMSSP\0";
 const SIGNATURE_LEN: usize = 8;
 
 /// Trait to convert a u8 to a `enum` representation
-trait FromUint where Self: Sized {
+trait FromUint
+where
+    Self: Sized,
+{
     fn from_u8(n: u8) -> Option<Self>;
     fn from_u16(n: u16) -> Option<Self>;
 }
@@ -43,28 +43,37 @@ pub trait NextBytes {
     fn next_bytes(&mut self, bytes: Option<&[u8]>) -> io::Result<Option<Vec<u8>>>;
 }
 
-macro_rules! uint_to_enum {
-    ($ty:ident, $($variant:ident),*) => {
-        impl FromUint for $ty {
-            fn from_u8(n: u8) -> Option<$ty> {
-                // this should get stripped on compilation and is only used
-                // to ensure all enum variants are passed to this macro
-                fn _static_verification(t: $ty) -> bool {
-                    match t {
-                        $( $ty::$variant => true, )*
-                    }
-                }
+macro_rules! uint_enum {
+    ($( #[$gattr:meta] )* pub enum $ty:ident { $( $( #[$attr:meta] )* $variant:ident = $val:expr,)* }) => {
+        uint_enum!($( #[$gattr ])* (pub) enum $ty { $( $( #[$attr] )* $variant = $val, )* });
+    };
+    ($( #[$gattr:meta] )* enum $ty:ident { $( $( #[$attr:meta] )* $variant:ident = $val:expr,)* }) => {
+        uint_enum!($( #[$gattr ])* () enum $ty { $( $( #[$attr] )* $variant = $val, )* });
+    };
 
+    ($( #[$gattr:meta] )* ( $($vis:tt)* ) enum $ty:ident { $( $( #[$attr:meta] )* $variant:ident = $val:expr,)* }) => {
+        #[derive(Debug, Copy, Clone, PartialEq)]
+        $( #[$gattr] )*
+        $( $vis )* enum $ty {
+            $( $( #[$attr ])* $variant = $val, )*
+        }
+
+        impl ::std::convert::TryFrom<u8> for $ty {
+            type Error = ();
+            fn try_from(n: u8) -> ::std::result::Result<$ty, ()> {
                 match n {
-                    $( x if x == $ty::$variant as u8 => Some($ty::$variant), )*
-                    _ => None
+                    $( x if x == $ty::$variant as u8 => Ok($ty::$variant), )*
+                    _ => Err(()),
                 }
             }
+        }
 
-            fn from_u16(n: u16) -> Option<$ty> {
+        impl ::std::convert::TryFrom<u16> for $ty {
+            type Error = ();
+            fn try_from(n: u16) -> ::std::result::Result<$ty, ()> {
                 match n {
-                    $( x if x == $ty::$variant as u16 => Some($ty::$variant), )*
-                    _ => None
+                    $( x if x == $ty::$variant as u16 => Ok($ty::$variant), )*
+                    _ => Err(()),
                 }
             }
         }
@@ -86,7 +95,7 @@ bitflags! {
         /// requests an 128 bit session key
         const NTLMSSP_NEGOTIATE_128 = 1<<29;
         // r1,r2,r3 (unused)
-        
+
         /// T-bit
         /// requests the protocol version number
         const NTLMSSP_NEGOTIATE_VERSION = 1<<25;
@@ -171,43 +180,41 @@ impl NegotiateMessage {
     fn encode(&self) -> io::Result<Vec<u8>> {
         let mut bytes = Cursor::new(Vec::with_capacity(40));
 
-        try!(bytes.write_all(SIGNATURE));                                // signature
-        try!(bytes.write_u32::<LittleEndian>(1));                        // message_type
+        bytes.write_all(SIGNATURE)?; // signature
+        bytes.write_u32::<LittleEndian>(1)?; // message_type
 
         // make sure the negotiate flags do not contain workstation or domain flags
         let mut flags = self.negotiate_flags;
         flags.remove(NegotiateFlags::NTLMSSP_TARGET_TYPE_SERVER);
         flags.remove(NegotiateFlags::NTLMSSP_TARGET_TYPE_DOMAIN);
 
-        try!(bytes.write_u32::<LittleEndian>(flags.bits()));
+        bytes.write_u32::<LittleEndian>(flags.bits())?;
 
         // we write an empty domain and workspace name in the negotiate message, since we
         // cannot use unicode yet. and relying on OEM encoding is really really ugly.
-        try!(bytes.write_u64::<LittleEndian>(0));
-        try!(bytes.write_u64::<LittleEndian>(0));
+        bytes.write_u64::<LittleEndian>(0)?;
+        bytes.write_u64::<LittleEndian>(0)?;
 
         // we do not write version
         Ok(bytes.into_inner())
     }
 }
-
-#[repr(u16)]
-#[derive(Debug)]
-enum AvId {
-    MsvAvEOL = 0,
-    MsvAvNbComputerName = 0x01,
-    MsvAvNbDomainName = 0x02,
-    MsvAvDnsComputerName = 0x03,
-    MsvAvDnsDomainName = 0x04,
-    MsvAvDnsTreeName = 0x05,
-    MsvAvFlags = 0x06,
-    MsvAvTimestamp = 0x07,
-    MsvAvSingleHost = 0x08,
-    MsvAvTargetName = 0x09,
-    MsvChannelBindings = 0x0A,
+uint_enum! {
+    #[repr(u16)]
+    enum AvId {
+        MsvAvEOL = 0,
+        MsvAvNbComputerName = 0x01,
+        MsvAvNbDomainName = 0x02,
+        MsvAvDnsComputerName = 0x03,
+        MsvAvDnsDomainName = 0x04,
+        MsvAvDnsTreeName = 0x05,
+        MsvAvFlags = 0x06,
+        MsvAvTimestamp = 0x07,
+        MsvAvSingleHost = 0x08,
+        MsvAvTargetName = 0x09,
+        MsvChannelBindings = 0x0A,
+    }
 }
-uint_to_enum!(AvId, MsvAvEOL, MsvAvNbComputerName, MsvAvNbDomainName, MsvAvDnsComputerName, MsvAvDnsDomainName, MsvAvDnsTreeName, 
-    MsvAvFlags, MsvAvTimestamp, MsvAvSingleHost, MsvAvTargetName, MsvChannelBindings);
 
 bitflags! {
     struct AvFlags: u32 {
@@ -226,7 +233,7 @@ enum AvItem {
     DnsDomainName(String),
     DnsTreeName(String),
     Flags(AvFlags),
-    /// [MS-DTYP] section 2.3.3: The FILETIME structure is a 64-bit value that represents the number of 
+    /// [MS-DTYP] section 2.3.3: The FILETIME structure is a 64-bit value that represents the number of
     /// 100-nanosecond intervals that have elapsed since January 1, 1601, Coordinated Universal Time (UTC).
     Timestamp(u64),
     AvTargetName(String),
@@ -248,7 +255,7 @@ trait DecodeExt {
 impl<W: Write> EncodeExt for W {
     fn encode_unicode_string(&mut self, str_: &str) -> io::Result<()> {
         for chr in str_.encode_utf16() {
-            try!(self.write_u16::<LittleEndian>(chr));
+            self.write_u16::<LittleEndian>(chr)?;
         }
         Ok(())
     }
@@ -262,30 +269,30 @@ impl<W: Write> EncodeExt for W {
                 AvItem::DnsDomainName(ref name) => (AvId::MsvAvDnsDomainName, name.len(), name),
                 AvItem::DnsTreeName(ref name) => (AvId::MsvAvDnsTreeName, name.len(), name),
                 AvItem::Flags(ref flags) => {
-                    try!(self.write_u16::<LittleEndian>(AvId::MsvAvFlags as u16));
-                    try!(self.write_u16::<LittleEndian>(4));
-                    try!(self.write_u32::<LittleEndian>(flags.bits()));
+                    self.write_u16::<LittleEndian>(AvId::MsvAvFlags as u16)?;
+                    self.write_u16::<LittleEndian>(4)?;
+                    self.write_u32::<LittleEndian>(flags.bits())?;
                     continue;
-                },
+                }
                 AvItem::Timestamp(ts) => {
-                    try!(self.write_u16::<LittleEndian>(AvId::MsvAvTimestamp as u16));
-                    try!(self.write_u16::<LittleEndian>(8));
-                    try!(self.write_u64::<LittleEndian>(ts));
+                    self.write_u16::<LittleEndian>(AvId::MsvAvTimestamp as u16)?;
+                    self.write_u16::<LittleEndian>(8)?;
+                    self.write_u64::<LittleEndian>(ts)?;
                     continue;
-                },
+                }
                 AvItem::AvTargetName(ref name) => (AvId::MsvAvTargetName, name.len(), name),
                 AvItem::ChannelBindings(ref bindings) => {
-                    try!(self.write_u16::<LittleEndian>(AvId::MsvChannelBindings as u16));
-                    try!(self.write_u16::<LittleEndian>(bindings.len() as u16));
-                    try!(self.write_all(bindings));
+                    self.write_u16::<LittleEndian>(AvId::MsvChannelBindings as u16)?;
+                    self.write_u16::<LittleEndian>(bindings.len() as u16)?;
+                    self.write_all(bindings)?;
                     continue;
                 }
             };
-            try!(self.write_u16::<LittleEndian>(id as u16));
-            try!(self.write_u16::<LittleEndian>(2*len as u16));
-            try!(self.encode_unicode_string(str_));
+            self.write_u16::<LittleEndian>(id as u16)?;
+            self.write_u16::<LittleEndian>(2 * len as u16)?;
+            self.encode_unicode_string(str_)?;
         }
-        try!(self.write_u16::<LittleEndian>(AvId::MsvAvEOL as u16));
+        self.write_u16::<LittleEndian>(AvId::MsvAvEOL as u16)?;
         self.write_u16::<LittleEndian>(0)
     }
 }
@@ -293,60 +300,83 @@ impl<W: Write> EncodeExt for W {
 impl<R: Read> DecodeExt for R {
     fn decode_unicode_string(&mut self, len: usize, name: &'static str) -> io::Result<String> {
         if len % 2 > 0 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, format!("{} unicode value has to be a multiple of 2 (utf16)", name)));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{} unicode value has to be a multiple of 2 (utf16)", name),
+            ));
         }
         let mut bytes: Vec<u16> = Vec::with_capacity(len as usize / 2);
         for _ in 0..len as usize / 2 {
-            bytes.push(try!(self.read_u16::<LittleEndian>()));
+            bytes.push(self.read_u16::<LittleEndian>()?);
         }
-        let str_ = try!(String::from_utf16(&bytes).map_err(|_| 
-            io::Error::new(io::ErrorKind::InvalidData, format!("could not decode {} (utf16 decoding failure)", name))));
+        let str_ = String::from_utf16(&bytes).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("could not decode {} (utf16 decoding failure)", name),
+            )
+        })?;
         Ok(str_)
     }
 
     fn decode_av_pairs(&mut self) -> io::Result<Vec<AvItem>> {
         let mut pairs = Vec::with_capacity(4);
         loop {
-            let id = try!(AvId::from_u16(try!(self.read_u16::<LittleEndian>())).ok_or(
-                io::Error::new(io::ErrorKind::InvalidData, "invalid av_id")));
-            let len = try!(self.read_u16::<LittleEndian>()) as usize;
+            let id = AvId::try_from(self.read_u16::<LittleEndian>()?)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid av_id"))?;
+            let len = self.read_u16::<LittleEndian>()? as usize;
 
             // TODO: length checks
             let item = match (id, len) {
                 (AvId::MsvAvEOL, 0) => break,
-                (AvId::MsvAvEOL, _) => return Err(io::Error::new(io::ErrorKind::InvalidData, "AV-eol length non-null")),
-                (AvId::MsvAvNbComputerName, _) => AvItem::NbComputerName(try!(self.decode_unicode_string(len, "AV(nb_computer_name)"))),
-                (AvId::MsvAvNbDomainName, _) => AvItem::NbDomainName(try!(self.decode_unicode_string(len, "AV(nb_domain_name)"))),
-                (AvId::MsvAvDnsComputerName, _) => AvItem::DnsComputerName(try!(self.decode_unicode_string(len, "AV(dns_computer_name)"))),
-                (AvId::MsvAvDnsDomainName, _) => AvItem::DnsDomainName(try!(self.decode_unicode_string(len, "AV(dns_domain_name)"))),
-                (AvId::MsvAvDnsTreeName, _) => AvItem::DnsTreeName(try!(self.decode_unicode_string(len, "AV(dns_tree_name)"))),
+                (AvId::MsvAvEOL, _) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "AV-eol length non-null",
+                    ))
+                }
+                (AvId::MsvAvNbComputerName, _) => {
+                    AvItem::NbComputerName(self.decode_unicode_string(len, "AV(nb_computer_name)")?)
+                }
+                (AvId::MsvAvNbDomainName, _) => {
+                    AvItem::NbDomainName(self.decode_unicode_string(len, "AV(nb_domain_name)")?)
+                }
+                (AvId::MsvAvDnsComputerName, _) => AvItem::DnsComputerName(
+                    self.decode_unicode_string(len, "AV(dns_computer_name)")?
+                ),
+                (AvId::MsvAvDnsDomainName, _) => {
+                    AvItem::DnsDomainName(self.decode_unicode_string(len, "AV(dns_domain_name)")?)
+                }
+                (AvId::MsvAvDnsTreeName, _) => {
+                    AvItem::DnsTreeName(self.decode_unicode_string(len, "AV(dns_tree_name)")?)
+                }
                 (AvId::MsvAvFlags, _) => {
-                    AvItem::Flags(try!(AvFlags::from_bits(try!(self.read_u32::<LittleEndian>())).ok_or(
-                        io::Error::new(io::ErrorKind::InvalidData, "invalid AV flags"))))
-                },
+                    AvItem::Flags(AvFlags::from_bits(self.read_u32::<LittleEndian>()?).ok_or(
+                        io::Error::new(io::ErrorKind::InvalidData, "invalid AV flags"),
+                    )?)
+                }
                 (AvId::MsvAvTimestamp, _) => {
                     // TODO: not sure this is correct, since FILETIME consists of dwLowDateTime/dwHighDateTime
                     // maybe we need:
                     // let low = try!(self.read_u32::<LittleEndian>());
                     // let high = try!(self.read_u32::<LittleEndian>());
                     // let ts = low as u64 | (high as u64) << 32;
-                    AvItem::Timestamp(try!(self.read_u64::<LittleEndian>()))
-                },
+                    AvItem::Timestamp(self.read_u64::<LittleEndian>()?)
+                }
                 (AvId::MsvAvSingleHost, _) => unimplemented!(),
-                (AvId::MsvAvTargetName, _) => AvItem::AvTargetName(try!(self.decode_unicode_string(len, "AV(target_name)"))),
+                (AvId::MsvAvTargetName, _) => {
+                    AvItem::AvTargetName(self.decode_unicode_string(len, "AV(target_name)")?)
+                }
                 (AvId::MsvChannelBindings, _) => {
                     let mut bytes = [0u8; 16];
-                    try!(self.read_exact(&mut bytes));
+                    self.read_exact(&mut bytes)?;
                     AvItem::ChannelBindings(bytes)
-                },
+                }
             };
             pairs.push(item);
         }
         Ok(pairs)
     }
 }
-
-
 
 /// 2.2.1.2
 #[derive(Debug)]
@@ -361,74 +391,102 @@ impl ChallengeMessage {
     fn decode<R: Read>(mut r: R) -> io::Result<Self> {
         let mut payload_offset = 48;
         let mut sig_bytes = [0u8; SIGNATURE_LEN];
-        try!(r.read_exact(&mut sig_bytes));
+        r.read_exact(&mut sig_bytes)?;
         if sig_bytes != SIGNATURE {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "signature mismatch"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "signature mismatch",
+            ));
         }
-        if try!(r.read_u32::<LittleEndian>()) != 2 {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid message type"));
+        if r.read_u32::<LittleEndian>()? != 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid message type",
+            ));
         }
-        let target_name_len = try!(r.read_u16::<LittleEndian>());
-        if target_name_len != try!(r.read_u16::<LittleEndian>()) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "target_name and target_name_max are not equal"));
+        let target_name_len = r.read_u16::<LittleEndian>()?;
+        if target_name_len != r.read_u16::<LittleEndian>()? {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "target_name and target_name_max are not equal",
+            ));
         }
-        let target_name_offset = try!(r.read_u32::<LittleEndian>());
+        let target_name_offset = r.read_u32::<LittleEndian>()?;
 
-        let raw_flags = try!(r.read_u32::<LittleEndian>());
-        let negotiate_flags = try!(NegotiateFlags::from_bits(raw_flags)
-            .ok_or(io::Error::new(io::ErrorKind::InvalidData, "invalid negotiate flags")));
+        let raw_flags = r.read_u32::<LittleEndian>()?;
+        let negotiate_flags = NegotiateFlags::from_bits(raw_flags).ok_or(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid negotiate flags",
+        ))?;
 
         let mut server_challenge = [0u8; 8];
-        try!(r.read_exact(&mut server_challenge));
+        r.read_exact(&mut server_challenge)?;
         // read reserved, reusing space
-        try!(r.read_exact(&mut sig_bytes));
+        r.read_exact(&mut sig_bytes)?;
 
-        let target_info_len = try!(r.read_u16::<LittleEndian>());
-        if target_info_len != try!(r.read_u16::<LittleEndian>()) {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "target_info and target_info_max are not equal"));
+        let target_info_len = r.read_u16::<LittleEndian>()?;
+        if target_info_len != r.read_u16::<LittleEndian>()? {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "target_info and target_info_max are not equal",
+            ));
         }
-        let target_info_offset = try!(r.read_u32::<LittleEndian>());
+        let target_info_offset = r.read_u32::<LittleEndian>()?;
 
         if negotiate_flags.contains(NegotiateFlags::NTLMSSP_NEGOTIATE_VERSION) {
             payload_offset += 8;
             // read version, only used for debug
-            try!(r.read_exact(&mut sig_bytes));
+            r.read_exact(&mut sig_bytes)?;
         }
 
         // start of payload parsing
         if target_name_len > 0 && target_name_offset < payload_offset {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid target_info offset"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid target_info offset",
+            ));
         }
         if target_info_len > 0 && target_info_offset < payload_offset {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid target_info offset"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid target_info offset",
+            ));
         }
         // find the first payload element
         let payload_elements = match (target_name_len, target_info_len) {
             (0, 0) => 0,
             (0, _) => 1,
             (_, 0) => 1,
-            (_, _) => 2,   
+            (_, _) => 2,
         };
 
         let mut target_name: Option<String> = None;
         let mut av_pairs: Vec<AvItem> = vec![];
 
         for _ in 0..payload_elements {
-            let parse_target_name = (target_info_offset > target_name_offset) && target_name.is_none() || !av_pairs.is_empty();
-            let parse_av_pairs = (target_info_offset < target_name_offset) && av_pairs.is_empty() || target_name.is_some();
+            let parse_target_name = (target_info_offset > target_name_offset)
+                && target_name.is_none()
+                || !av_pairs.is_empty();
+            let parse_av_pairs = (target_info_offset < target_name_offset) && av_pairs.is_empty()
+                || target_name.is_some();
 
             if parse_target_name {
                 let skip_bytes = target_name_offset - payload_offset;
-                try!(r.read_exact(&mut vec![0u8; skip_bytes as usize]));
-                target_name = Some(try!(r.decode_unicode_string(target_name_len as usize, "target_name")));
+                r.read_exact(&mut vec![0u8; skip_bytes as usize])?;
+                target_name = Some(
+                    r.decode_unicode_string(target_name_len as usize, "target_name")?
+                );
                 payload_offset += target_name_len as u32 + skip_bytes as u32;
             } else if parse_av_pairs {
                 let skip_bytes = target_info_offset - payload_offset;
-                try!(r.read_exact(&mut vec![0u8; skip_bytes as usize]));
-                av_pairs = try!(r.decode_av_pairs());
+                r.read_exact(&mut vec![0u8; skip_bytes as usize])?;
+                av_pairs = r.decode_av_pairs()?;
                 payload_offset += target_info_len as u32 + skip_bytes as u32;
             } else {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid payload data"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid payload data",
+                ));
             }
         }
 
@@ -461,7 +519,7 @@ struct AuthenticateMessage<'a> {
 }
 
 fn ntowfv2(user: &str, password: &str, domain: &str) -> Vec<u8> {
-    let mut pwbuf: Vec<u8> = Vec::with_capacity(2*password.len());
+    let mut pwbuf: Vec<u8> = Vec::with_capacity(2 * password.len());
     let mut buf = [0u8; 2];
     for chr in password.encode_utf16() {
         LittleEndian::write_u16(&mut buf, chr);
@@ -473,7 +531,7 @@ fn ntowfv2(user: &str, password: &str, domain: &str) -> Vec<u8> {
     let message = {
         let mut message = user.to_uppercase();
         message.push_str(domain);
-        let mut msg_buf = Vec::with_capacity(2*message.len());
+        let mut msg_buf = Vec::with_capacity(2 * message.len());
         for chr in message.encode_utf16() {
             LittleEndian::write_u16(&mut buf, chr);
             msg_buf.extend_from_slice(&buf);
@@ -489,25 +547,25 @@ impl<'a> AuthenticateMessage<'a> {
         let mut payload_offset: u64 = 88;
 
         let mut bytes = Cursor::new(Vec::with_capacity(256));
-        try!(bytes.write_all(SIGNATURE));           // signature
-        try!(bytes.write_u32::<LittleEndian>(3));   // message_type
+        bytes.write_all(SIGNATURE)?; // signature
+        bytes.write_u32::<LittleEndian>(3)?; // message_type
 
         // LmChallengeResponse, deprecated so not supported by us (send Z(24) as the DOC says)
-        try!(bytes.write_u16::<LittleEndian>(24));
-        try!(bytes.write_u16::<LittleEndian>(24));
-        try!(bytes.write_u32::<LittleEndian>(payload_offset as u32));
+        bytes.write_u16::<LittleEndian>(24)?;
+        bytes.write_u16::<LittleEndian>(24)?;
+        bytes.write_u32::<LittleEndian>(payload_offset as u32)?;
         payload_offset += 24;
 
         // write NtChallengeResponse (2.2.2.8)
         {
             let len = self.nt_challenge_response.len() as u16;
-            try!(bytes.write_u16::<LittleEndian>(len));
-            try!(bytes.write_u16::<LittleEndian>(len));
-            try!(bytes.write_u32::<LittleEndian>(payload_offset as u32));
+            bytes.write_u16::<LittleEndian>(len)?;
+            bytes.write_u16::<LittleEndian>(len)?;
+            bytes.write_u32::<LittleEndian>(payload_offset as u32)?;
 
             let bak = bytes.position();
             bytes.set_position(payload_offset);
-            try!(bytes.write_all(&self.nt_challenge_response));
+            bytes.write_all(&self.nt_challenge_response)?;
             payload_offset = bytes.position();
             bytes.set_position(bak);
         }
@@ -517,35 +575,35 @@ impl<'a> AuthenticateMessage<'a> {
         let domain = self.domain.as_ref().map(|x| x.as_ref()).unwrap_or("");
 
         for str_ in &[domain, self.user.as_ref(), workstation] {
-            let field_len = 2*str_.len();
-            try!(bytes.write_u16::<LittleEndian>(field_len as u16));
-            try!(bytes.write_u16::<LittleEndian>(field_len as u16));
-            try!(bytes.write_u32::<LittleEndian>(payload_offset as u32));
+            let field_len = 2 * str_.len();
+            bytes.write_u16::<LittleEndian>(field_len as u16)?;
+            bytes.write_u16::<LittleEndian>(field_len as u16)?;
+            bytes.write_u32::<LittleEndian>(payload_offset as u32)?;
 
             let bak = bytes.position();
             bytes.set_position(payload_offset);
-            assert_eq!(payload_offset%2, 0);
+            assert_eq!(payload_offset % 2, 0);
             // this only works for "unicode" (ucs-2) encoding but using anything else is suicide
             for chr in str_.encode_utf16() {
-                try!(bytes.write_u16::<LittleEndian>(chr));
+                bytes.write_u16::<LittleEndian>(chr)?;
             }
             payload_offset = bytes.position();
             bytes.set_position(bak);
         }
 
         // write EncryptedRandomSessionKey (NTLMSSP_NEGOTIATE_KEY_EXCH)
-        try!(bytes.write_u16::<LittleEndian>(self.encrypted_random_session_key.len() as u16));
-        try!(bytes.write_u16::<LittleEndian>(self.encrypted_random_session_key.len() as u16));
-        try!(bytes.write_u32::<LittleEndian>(payload_offset as u32));
+        bytes.write_u16::<LittleEndian>(self.encrypted_random_session_key.len() as u16)?;
+        bytes.write_u16::<LittleEndian>(self.encrypted_random_session_key.len() as u16)?;
+        bytes.write_u32::<LittleEndian>(payload_offset as u32)?;
         let bak = bytes.position();
         bytes.set_position(payload_offset);
-        try!(bytes.write_all(&self.encrypted_random_session_key));
+        bytes.write_all(&self.encrypted_random_session_key)?;
         bytes.set_position(bak);
 
         // write negotiate flags
-        try!(bytes.write_u32::<LittleEndian>(self.negotiate_flags.bits()));
+        bytes.write_u32::<LittleEndian>(self.negotiate_flags.bits())?;
 
-        try!(bytes.write_u64::<LittleEndian>(0));
+        bytes.write_u64::<LittleEndian>(0)?;
         assert_eq!(bytes.position(), 72);
 
         // WTF Microsoft: MIC is only checked when the flags we sent for THIS authentication message include SIGN/SEAL/ALWAYS_SIGN
@@ -554,9 +612,9 @@ impl<'a> AuthenticateMessage<'a> {
             let mut all_content = mic_content.to_vec();
             all_content.extend_from_slice(bytes.get_ref());
             let mic = Md5::hmac(&self.exported_session_key, &all_content);
-            try!(bytes.write_all(&mic));
+            bytes.write_all(&mic)?;
         } else {
-            try!(bytes.write_all(&[0; 16]));
+            bytes.write_all(&[0; 16])?;
         }
 
         Ok(bytes.into_inner())
@@ -582,27 +640,34 @@ struct Ntlmv2Response<'a> {
 
 impl<'a> Ntlmv2Response<'a> {
     fn encode_ntlm2_client_challenge<W: Write>(&self, mut w: W) -> io::Result<()> {
-        try!(w.write_u8(1)); // respType
-        try!(w.write_u8(1)); // hiRespType
-        try!(w.write_u16::<LittleEndian>(0)); //reserved1
-        try!(w.write_u32::<LittleEndian>(0)); //reserved2
+        w.write_u8(1)?; // respType
+        w.write_u8(1)?; // hiRespType
+        w.write_u16::<LittleEndian>(0)?; //reserved1
+        w.write_u32::<LittleEndian>(0)?; //reserved2
         let nano_seconds = if let Some(x) = self.timestamp {
             x
         } else {
             // nanoseconds since mindnight Jan. 1, 1601 (UTC) / 100
-            let delta_time = 116444736000000000u64; 
+            let delta_time = 116444736000000000u64;
             let unix_time_delta = match SystemTime::now().duration_since(UNIX_EPOCH) {
-                Err(_) => return Err(io::Error::new(io::ErrorKind::Other, "could not convert current systemtime")),
+                Err(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "could not convert current systemtime",
+                    ))
+                }
                 Ok(x) => x,
             };
-            delta_time + (unix_time_delta.as_secs() as u64 * (1e9 as u64 / 100)) + (unix_time_delta.subsec_nanos() as u64 / 100)
+            delta_time
+                + (unix_time_delta.as_secs() as u64 * (1e9 as u64 / 100))
+                + (unix_time_delta.subsec_nanos() as u64 / 100)
         };
-        try!(w.write_u64::<LittleEndian>(nano_seconds));
+        w.write_u64::<LittleEndian>(nano_seconds)?;
         let mut client_challenge = [0u8; 8];
         thread_rng().fill_bytes(&mut client_challenge);
-        try!(w.write_all(&client_challenge));
-        try!(w.write_u32::<LittleEndian>(0)); //reserved3
-        try!(w.encode_av_pairs(&self.av_pairs));
+        w.write_all(&client_challenge)?;
+        w.write_u32::<LittleEndian>(0)?; //reserved3
+        w.encode_av_pairs(&self.av_pairs)?;
 
         Ok(())
     }
@@ -611,7 +676,7 @@ impl<'a> Ntlmv2Response<'a> {
     fn encode(&self) -> io::Result<EncodedNtlmv2Response> {
         // EncryptedRandomSessionKey (we only support NTLMv2 in the securest configuration):
         let mut temp = vec![];
-        try!(self.encode_ntlm2_client_challenge(&mut temp));
+        self.encode_ntlm2_client_challenge(&mut temp)?;
         let response_key_nt = ntowfv2(&self.user, &self.password, &self.domain);
 
         let nt_proof_str = {
@@ -676,8 +741,11 @@ impl<'a> NtlmV2ClientBuilder<'a> {
     /// (would be accepted by ANY server) and to any channel  
     /// (can be relayed in general and isn't limited to the current connection)  
     /// So make sure to use `target_spn`/`channel_bindings`
-    pub fn build<D, U, P>(self, domain: Option<D>, user: U, password: P) -> NtlmV2Client<'a> 
-        where D: Into<Cow<'a, str>>, U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> 
+    pub fn build<D, U, P>(self, domain: Option<D>, user: U, password: P) -> NtlmV2Client<'a>
+    where
+        D: Into<Cow<'a, str>>,
+        U: Into<Cow<'a, str>>,
+        P: Into<Cow<'a, str>>,
     {
         NtlmV2Client {
             target_spn: self.target_spn,
@@ -741,8 +809,11 @@ fn make_sec_channel_bindings(data: &[u8], hash: bool) -> Vec<u8> {
 impl<'a> NtlmV2Client<'a> {
     /// Construct a new authentication client that attempts to authenticate against target
     /// with the given user and password
-    fn new<D, U, P>(domain: Option<D>, user: U, password: P) -> NtlmV2Client<'a> 
-        where D: Into<Cow<'a, str>>, U: Into<Cow<'a, str>>, P: Into<Cow<'a, str>> 
+    fn new<D, U, P>(domain: Option<D>, user: U, password: P) -> NtlmV2Client<'a>
+    where
+        D: Into<Cow<'a, str>>,
+        U: Into<Cow<'a, str>>,
+        P: Into<Cow<'a, str>>,
     {
         let workstation = match env::var("COMPUTERNAME") {
             Ok(x) => x.into(),
@@ -765,38 +836,47 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
     /// This returns the next bytes which have to be sent to the server.  
     /// The authentication is complete, when this returns `None`
     fn next_bytes(&mut self, bytes: Option<&[u8]>) -> io::Result<Option<Vec<u8>>> {
-        let needed_flags = NegotiateFlags::NTLMSSP_NEGOTIATE_TARGET_INFO | 
-                           NegotiateFlags::NTLMSSP_NEGOTIATE_128 | 
-                           NegotiateFlags::NTLMSSP_NEGOTIATE_KEY_EXCH | 
-                           NegotiateFlags::NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY | 
-                           NegotiateFlags::NTLMSSP_NEGOTIATE_ALWAYS_SIGN |
-                           NegotiateFlags::NTLMSSP_NEGOTIATE_SEAL |
-                           NegotiateFlags::NTLMSSP_NEGOTIATE_UNICODE;
+        let needed_flags = NegotiateFlags::NTLMSSP_NEGOTIATE_TARGET_INFO
+            | NegotiateFlags::NTLMSSP_NEGOTIATE_128
+            | NegotiateFlags::NTLMSSP_NEGOTIATE_KEY_EXCH
+            | NegotiateFlags::NTLMSSP_NEGOTIATE_EXTENDED_SESSIONSECURITY
+            | NegotiateFlags::NTLMSSP_NEGOTIATE_ALWAYS_SIGN
+            | NegotiateFlags::NTLMSSP_NEGOTIATE_SEAL
+            | NegotiateFlags::NTLMSSP_NEGOTIATE_UNICODE;
         match self.state {
             NtlmV2ClientState::Initial => {
                 if bytes.is_some() {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "bytes given for initial ntlm client state (expected none)"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "bytes given for initial ntlm client state (expected none)",
+                    ));
                 }
                 let negotiate_msg = NegotiateMessage {
                     negotiate_flags: needed_flags,
                 };
-                let ret = try!(negotiate_msg.encode());
+                let ret = negotiate_msg.encode()?;
                 self.all_bytes.extend_from_slice(&ret);
                 self.state = NtlmV2ClientState::Negotiated;
                 Ok(Some(ret))
-            },
+            }
             NtlmV2ClientState::Negotiated => {
                 let bytes = if let Some(bytes) = bytes {
                     bytes
                 } else {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "bytes given for initial ntlm client state (expected none)"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "bytes given for initial ntlm client state (expected none)",
+                    ));
                 };
                 self.all_bytes.extend_from_slice(bytes.as_ref());
-                let mut challenge_msg = try!(ChallengeMessage::decode(bytes.as_ref()));
-                
+                let mut challenge_msg = ChallengeMessage::decode(bytes.as_ref())?;
+
                 // check if the challenge contains the flags we previously requested
                 if !challenge_msg.negotiate_flags.contains(needed_flags) {
-                    return Err(io::Error::new(io::ErrorKind::InvalidInput, "expected requested flags"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "expected requested flags",
+                    ));
                 }
 
                 // set MIC bit in flags and channel binding (3.1.5.1.2)
@@ -807,17 +887,26 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                         has_flags = true;
                     }
                     if let AvItem::AvTargetName(_) = *item {
-                        return Err(io::Error::new(io::ErrorKind::InvalidInput, "unexpected targetname in challenge avitems"));
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            "unexpected targetname in challenge avitems",
+                        ));
                     }
                 }
                 if !has_flags {
-                    challenge_msg.av_pairs.push(AvItem::Flags(AvFlags::AVF_MIC_FIELD_POPULATED));
+                    challenge_msg
+                        .av_pairs
+                        .push(AvItem::Flags(AvFlags::AVF_MIC_FIELD_POPULATED));
                 }
                 if let Some(channel_bindings) = self.channel_bindings {
-                    challenge_msg.av_pairs.push(AvItem::ChannelBindings(channel_bindings));
+                    challenge_msg
+                        .av_pairs
+                        .push(AvItem::ChannelBindings(channel_bindings));
                 }
                 if let Some(ref target_spn) = self.target_spn {
-                    challenge_msg.av_pairs.push(AvItem::AvTargetName(target_spn.as_ref().into()));
+                    challenge_msg
+                        .av_pairs
+                        .push(AvItem::AvTargetName(target_spn.as_ref().into()));
                 }
 
                 // extract timestamp
@@ -827,21 +916,27 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                         match *item {
                             AvItem::DnsComputerName(_) => name = true,
                             AvItem::Timestamp(ts) => timestamp = Some(ts),
-                            _ => ()
+                            _ => (),
                         }
                     }
                     if !name {
-                        return Err(io::Error::new(io::ErrorKind::InvalidData, "expected DNSName for authenticate!"));
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "expected DNSName for authenticate!",
+                        ));
                     }
                     timestamp
                 } else {
-                    return Err(io::Error::new(io::ErrorKind::InvalidData, "expected AVpairs for authenticate!"));
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "expected AVpairs for authenticate!",
+                    ));
                 };
 
                 // 3.1.5.1.2 Client Receives a CHALLENGE_MESSAGE
                 let domain = match self.domain {
                     Some(ref domain) => domain,
-                    None => ""
+                    None => "",
                 };
                 let ntlmv2_response = {
                     let ntlmv2_response = Ntlmv2Response {
@@ -852,7 +947,7 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                         av_pairs: &challenge_msg.av_pairs,
                         server_challenge: &challenge_msg.server_challenge,
                     };
-                    try!(ntlmv2_response.encode())
+                    ntlmv2_response.encode()?
                 };
                 let auth_msg = AuthenticateMessage {
                     domain: self.domain.as_ref().map(|x| x.as_ref().into()),
@@ -864,10 +959,10 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
                     negotiate_flags: needed_flags,
                     mic_content: Some(self.all_bytes.as_ref()),
                 };
-                let bytes = try!(auth_msg.encode());
+                let bytes = auth_msg.encode()?;
                 self.state = NtlmV2ClientState::Authenticated;
                 Ok(Some(bytes))
-            },
+            }
             NtlmV2ClientState::Authenticated => Ok(None),
         }
     }
@@ -875,12 +970,18 @@ impl<'a> NextBytes for NtlmV2Client<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::NtlmV2ClientBuilder;
     use super::ntowfv2;
+    use super::NtlmV2ClientBuilder;
 
     #[test]
     fn test_ntowfv2() {
-        assert_eq!(ntowfv2("User", "Password", "Domain"), vec![0x0c, 0x86, 0x8a, 0x40, 0x3b, 0xfd, 0x7a, 0x93, 0xa3, 0x00, 0x1e, 0xf2, 0x2e, 0xf0, 0x2e, 0x3f]);
+        assert_eq!(
+            ntowfv2("User", "Password", "Domain"),
+            vec![
+                0x0c, 0x86, 0x8a, 0x40, 0x3b, 0xfd, 0x7a, 0x93, 0xa3, 0x00, 0x1e, 0xf2, 0x2e, 0xf0,
+                0x2e, 0x3f
+            ]
+        );
     }
 
     #[test]
@@ -889,6 +990,9 @@ mod tests {
         let expect = b"\x65\x86\xE9\x9D\x81\xC2\xFC\x98\x4E\x47\x17\x2F\xD4\xDD\x03\x10";
 
         let builder = NtlmV2ClientBuilder::new();
-        assert_eq!(&builder.channel_bindings(bindings).channel_bindings.unwrap() as &[u8], expect);
+        assert_eq!(
+            &builder.channel_bindings(bindings).channel_bindings.unwrap() as &[u8],
+            expect
+        );
     }
 }

@@ -12,29 +12,27 @@ use self::winapi::ctypes;
 use self::winapi::shared::sspi;
 use self::winapi::shared::winerror;
 
-use NextBytes;
+use crate::NextBytes;
 
 static NTLM_PROVIDER: &'static [u8] = b"NTLM\0";
 
-const INIT_REQUEST_FLAGS: ctypes::c_ulong =
-    sspi::ISC_REQ_CONFIDENTIALITY |
-    sspi::ISC_REQ_INTEGRITY |
-    sspi::ISC_REQ_REPLAY_DETECT |
-    sspi::ISC_REQ_SEQUENCE_DETECT |
-    sspi::ISC_REQ_CONNECTION |
-    sspi::ISC_REQ_DELEGATE |
-    sspi::ISC_REQ_USE_SESSION_KEY |
-    sspi::ISC_REQ_ALLOCATE_MEMORY;
+const INIT_REQUEST_FLAGS: ctypes::c_ulong = sspi::ISC_REQ_CONFIDENTIALITY
+    | sspi::ISC_REQ_INTEGRITY
+    | sspi::ISC_REQ_REPLAY_DETECT
+    | sspi::ISC_REQ_SEQUENCE_DETECT
+    | sspi::ISC_REQ_CONNECTION
+    | sspi::ISC_REQ_DELEGATE
+    | sspi::ISC_REQ_USE_SESSION_KEY
+    | sspi::ISC_REQ_ALLOCATE_MEMORY;
 
-const ACCEPT_REQUEST_FLAGS: ctypes::c_ulong =
-    sspi::ASC_REQ_CONFIDENTIALITY |
-    sspi::ASC_REQ_INTEGRITY |
-    sspi::ASC_REQ_REPLAY_DETECT |
-    sspi::ASC_REQ_SEQUENCE_DETECT |
-    sspi::ASC_REQ_CONNECTION |
-    sspi::ASC_REQ_DELEGATE |
-    sspi::ASC_REQ_USE_SESSION_KEY |
-    sspi::ASC_REQ_ALLOCATE_MEMORY;
+const ACCEPT_REQUEST_FLAGS: ctypes::c_ulong = sspi::ASC_REQ_CONFIDENTIALITY
+    | sspi::ASC_REQ_INTEGRITY
+    | sspi::ASC_REQ_REPLAY_DETECT
+    | sspi::ASC_REQ_SEQUENCE_DETECT
+    | sspi::ASC_REQ_CONNECTION
+    | sspi::ASC_REQ_DELEGATE
+    | sspi::ASC_REQ_USE_SESSION_KEY
+    | sspi::ASC_REQ_ALLOCATE_MEMORY;
 
 /// Builder for `NtlmSspi` which provides configuration for it
 pub struct NtlmSspiBuilder {
@@ -104,15 +102,17 @@ impl NtlmSspi {
                 sspi::SECPKG_CRED_INBOUND
             };
             // accquire the initial token (negotiate for either kerberos or NTLM)
-            let ret = sspi::AcquireCredentialsHandleA(ptr::null_mut(),
-                                                      NTLM_PROVIDER.as_ptr() as *mut i8,
-                                                      direction,
-                                                      ptr::null_mut(),
-                                                      ptr::null_mut(),
-                                                      None,
-                                                      ptr::null_mut(),
-                                                      &mut handle,
-                                                      ptr::null_mut());
+            let ret = sspi::AcquireCredentialsHandleA(
+                ptr::null_mut(),
+                NTLM_PROVIDER.as_ptr() as *mut i8,
+                direction,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                None,
+                ptr::null_mut(),
+                &mut handle,
+                ptr::null_mut(),
+            );
             let cred = match ret {
                 winerror::SEC_E_OK => NtlmCred(handle),
                 err => return Err(io::Error::from_raw_os_error(err as i32)),
@@ -123,7 +123,7 @@ impl NtlmSspi {
                 ctx: None,
                 cred: cred,
             };
-    
+
             Ok(sso)
         }
     }
@@ -141,8 +141,10 @@ impl NextBytes for NtlmSspi {
                 (ctx.as_mut().unwrap() as *mut _, ptr::null_mut())
             };
 
-            let mut inbuf = [secbuf(sspi::SECBUFFER_EMPTY, None), 
-                             secbuf(sspi::SECBUFFER_TOKEN, in_bytes.as_ref().map(|x| x.as_ref()))];
+            let mut inbuf = [
+                secbuf(sspi::SECBUFFER_EMPTY, None),
+                secbuf(sspi::SECBUFFER_TOKEN, in_bytes.as_ref().map(|x| x.as_ref())),
+            ];
             if let Some(ref binding) = self.builder.channel_bindings {
                 inbuf[0] = secbuf(sspi::SECBUFFER_CHANNEL_BINDINGS, Some(binding));
             }
@@ -152,32 +154,41 @@ impl NextBytes for NtlmSspi {
 
             let mut outbuf = [secbuf(sspi::SECBUFFER_TOKEN, None)];
             let mut outbuf_desc = secbuf_desc(&mut outbuf);
-            let target_name_ptr = self.builder.target_spn.as_mut().map(|x| x.as_mut_ptr()).unwrap_or(ptr::null_mut());
+            let target_name_ptr = self
+                .builder
+                .target_spn
+                .as_mut()
+                .map(|x| x.as_mut_ptr())
+                .unwrap_or(ptr::null_mut());
             // create a token message
             let mut attrs = 0u32;
             let ret = if self.builder.outbound {
-                sspi::InitializeSecurityContextW(&mut self.cred.0,
-                                                 ctx_ptr_in,
-                                                 target_name_ptr,
-                                                 INIT_REQUEST_FLAGS,
-                                                 0,
-                                                 sspi::SECURITY_NATIVE_DREP,
-                                                 inbuf_ptr,
-                                                 0,
-                                                 ctx_ptr,
-                                                 &mut outbuf_desc,
-                                                 &mut attrs,
-                                                 ptr::null_mut())
+                sspi::InitializeSecurityContextW(
+                    &mut self.cred.0,
+                    ctx_ptr_in,
+                    target_name_ptr,
+                    INIT_REQUEST_FLAGS,
+                    0,
+                    sspi::SECURITY_NATIVE_DREP,
+                    inbuf_ptr,
+                    0,
+                    ctx_ptr,
+                    &mut outbuf_desc,
+                    &mut attrs,
+                    ptr::null_mut(),
+                )
             } else {
-                sspi::AcceptSecurityContext(&mut self.cred.0,
-                                            ctx_ptr_in,
-                                            inbuf_ptr,
-                                            ACCEPT_REQUEST_FLAGS,
-                                            sspi::SECURITY_NATIVE_DREP,
-                                            ctx_ptr,
-                                            &mut outbuf_desc,
-                                            &mut attrs,
-                                            ptr::null_mut())
+                sspi::AcceptSecurityContext(
+                    &mut self.cred.0,
+                    ctx_ptr_in,
+                    inbuf_ptr,
+                    ACCEPT_REQUEST_FLAGS,
+                    sspi::SECURITY_NATIVE_DREP,
+                    ctx_ptr,
+                    &mut outbuf_desc,
+                    &mut attrs,
+                    ptr::null_mut(),
+                )
             };
 
             match ret {
@@ -191,7 +202,7 @@ impl NextBytes for NtlmSspi {
                         assert_eq!(ret, winerror::SEC_E_OK);
                         Ok(None)
                     }
-                },
+                }
                 err => Err(io::Error::from_raw_os_error(err)),
             }
         }
@@ -200,9 +211,9 @@ impl NextBytes for NtlmSspi {
 
 #[cfg(test)]
 mod tests {
-    use std::env;
     use super::NtlmSspiBuilder;
-    use {NextBytes, NtlmV2ClientBuilder};
+    use std::env;
+    use crate::{NextBytes, NtlmV2ClientBuilder};
 
     /// check if we can authenticate us against us (using SSPI)
     #[test]
@@ -227,9 +238,9 @@ mod tests {
 
     fn get_auth_creds() -> (Option<String>, String, String) {
         (
-            None, 
+            None,
             env::var("USERNAME").unwrap(),
-            env::var("TEST_PW").unwrap()
+            env::var("TEST_PW").unwrap(),
         )
     }
 
@@ -242,7 +253,10 @@ mod tests {
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
         let authenticate_bytes = client.next_bytes(Some(&challenge_bytes)).unwrap().unwrap();
-        assert!(server.next_bytes(Some(&authenticate_bytes)).unwrap().is_none());
+        assert!(server
+            .next_bytes(Some(&authenticate_bytes))
+            .unwrap()
+            .is_none());
     }
 
     // To properly test channel bindings you need multiple machines, since:
@@ -253,20 +267,25 @@ mod tests {
     #[test]
     fn test_ntlm_channel_bindings_winapi_server() {
         let dbg_bindings = b"\x74\x6c\x73\x2d\x73\x65\x72\x76\x65\x72\x2d\x65\x6e\x64\x2d\x70\x6f\x69\x6e\x74\x3a\xea\x05\xfe\xfe\xcc\x6b\x0b\xd5\x71\xdb\xbc\x5b\xaa\x3e\xd4\x53\x86\xd0\x44\x68\x35\xf7\xb7\x4c\x85\x62\x1b\x99\x83\x47\x5f\x95";
-        
+
         let creds = get_auth_creds();
 
         let mut client = NtlmV2ClientBuilder::new()
             .channel_bindings(dbg_bindings)
-            .build(creds.0, creds.1,creds.2);
-        let mut server = NtlmSspiBuilder::new().inbound()
+            .build(creds.0, creds.1, creds.2);
+        let mut server = NtlmSspiBuilder::new()
+            .inbound()
             .channel_bindings(dbg_bindings)
-            .build().unwrap();
+            .build()
+            .unwrap();
 
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
         let authenticate_bytes = client.next_bytes(Some(&challenge_bytes)).unwrap().unwrap();
-        assert!(server.next_bytes(Some(&authenticate_bytes)).unwrap().is_none());
+        assert!(server
+            .next_bytes(Some(&authenticate_bytes))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -275,19 +294,20 @@ mod tests {
 
         let mut client = NtlmV2ClientBuilder::new()
             .target_spn("test-pc")
-            .build(creds.0, creds.1,creds.2);
-        let mut server = NtlmSspiBuilder::new().inbound()
-            .build().unwrap();
+            .build(creds.0, creds.1, creds.2);
+        let mut server = NtlmSspiBuilder::new().inbound().build().unwrap();
 
         // TODO: for CI register an SPN so that this test fails (since the SPN should match)
 
         let init_bytes = client.next_bytes(None).unwrap().unwrap();
         let challenge_bytes = server.next_bytes(Some(&init_bytes)).unwrap().unwrap();
         let authenticate_bytes = client.next_bytes(Some(&challenge_bytes)).unwrap().unwrap();
-        assert!(server.next_bytes(Some(&authenticate_bytes)).unwrap().is_none());
+        assert!(server
+            .next_bytes(Some(&authenticate_bytes))
+            .unwrap()
+            .is_none());
     }
 }
-
 
 // some helper stuff imported frm schannel.rs
 struct NtlmCred(sspi::CredHandle);
@@ -327,9 +347,7 @@ impl AsRef<[u8]> for ContextBuffer {
     }
 }
 
-
-unsafe fn secbuf(buftype: ctypes::c_ulong,
-                    bytes: Option<&[u8]>) -> sspi::SecBuffer {
+unsafe fn secbuf(buftype: ctypes::c_ulong, bytes: Option<&[u8]>) -> sspi::SecBuffer {
     let (ptr, len) = match bytes {
         Some(bytes) => (bytes.as_ptr(), bytes.len() as ctypes::c_ulong),
         None => (ptr::null(), 0),

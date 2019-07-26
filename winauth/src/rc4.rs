@@ -17,8 +17,8 @@ pub fn rc4(key: &[u8], message: &[u8]) -> Vec<u8> {
     let mut i = 0usize;
     let mut j = 0usize;
     while output.capacity() > output.len() {
-        i = (i+1) % 256;
-        j = (j+s[i] as usize) % 256;
+        i = (i + 1) % 256;
+        j = (j + s[i] as usize) % 256;
         s.swap(i, j);
         let idx_k = (s[i] as usize + s[j] as usize) % 256;
         let k = s[idx_k as usize];
