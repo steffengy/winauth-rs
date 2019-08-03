@@ -21,6 +21,8 @@ mod hmac;
 mod md4;
 mod rc4;
 
+pub mod http;
+
 #[cfg(windows)]
 pub mod windows;
 
@@ -39,6 +41,7 @@ where
     fn from_u16(n: u16) -> Option<Self>;
 }
 
+/// A generic challenge-response trait, that returns a response until authentication is established
 pub trait NextBytes {
     fn next_bytes(&mut self, bytes: Option<&[u8]>) -> io::Result<Option<Vec<u8>>>;
 }

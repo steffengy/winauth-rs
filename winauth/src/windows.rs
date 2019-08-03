@@ -237,6 +237,12 @@ impl NextBytes for NtlmSspi {
     }
 }
 
+impl crate::http::Authenticator for NtlmSspi {
+    fn auth_scheme(&self) -> &'static str {
+        "NTLM"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::NtlmSspiBuilder;

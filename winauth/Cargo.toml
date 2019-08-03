@@ -14,6 +14,13 @@ bitflags = "1.1"
 byteorder = "1.2.0"
 rand = "0.7"
 md5 = "0.6.1"
+base64 = { version = "0.10" }
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winerror", "sspi"] }
+
+[dev-dependencies]
+hyper = "0.12"
+hyper-tls = "0.3"
+reqwest= "0.9"
+cfg-if = "0.1"
