@@ -3,10 +3,12 @@
 //! This is mainly used to verify our implementation
 extern crate winapi;
 
+use std::ffi::OsString;
 use std::io;
 use std::mem;
 use std::ptr;
 use std::slice;
+use std::os::windows::ffi::OsStringExt;
 
 use self::winapi::ctypes;
 use self::winapi::shared::sspi;
@@ -115,7 +117,7 @@ impl NtlmSspi {
             );
             let cred = match ret {
                 winerror::SEC_E_OK => NtlmCred(handle),
-                err => return Err(io::Error::from_raw_os_error(err as i32)),
+                err => return Err(io::Error::last_os_error()),
             };
 
             let sso = NtlmSspi {
@@ -126,6 +128,32 @@ impl NtlmSspi {
 
             Ok(sso)
         }
+    }
+
+    /// Fetch the authenticated client identity (e.g. domain\\username)
+    pub fn client_identity(&mut self) -> io::Result<String> {
+        let mut buf: sspi::SecPkgContext_NamesW = unsafe { mem::zeroed() };
+
+        let ret = unsafe {
+            sspi::QueryContextAttributesW(
+                &mut self.ctx.as_mut().unwrap().0,
+                sspi::SECPKG_ATTR_NAMES,
+                &mut buf as *mut _ as *mut _)
+        };
+        if ret != winerror::S_OK {
+            return Err(io::Error::last_os_error());
+        }
+
+        let name = unsafe {
+            let len = (0..).take_while(|&i| *buf.sUserName.offset(i) != 0).count();
+            let slice = std::slice::from_raw_parts(buf.sUserName, len);
+            OsString::from_wide(slice).into_string()
+        };
+        unsafe {
+            sspi::FreeContextBuffer(buf.sUserName as *mut _ as *mut _);
+        }
+        
+        name.map_err(|_| io::Error::new(io::ErrorKind::Other, "invalid username: not unicode"))
     }
 }
 
