@@ -97,3 +97,43 @@ pub trait Authenticator: crate::NextBytes {
         Ok(AuthState::NotRequested)
     }
 }
+
+#[macro_export]
+macro_rules! perform_ntlm_request {
+    ($method:expr, $url:expr, $builder:ident, $bl:expr) => {{
+        let client = reqwest::Client::new();
+        let mut out_resp: Option<winauth::http::Response> = None;
+        let mut sspi = winauth::windows::NtlmSspiBuilder::new()
+            .outbound()
+            // .target_spn("HTTP/localhost:3030")
+            .build()
+            .unwrap();
+
+        loop
+        {
+            println!("Perform req...");
+            let mut builder = client.request($method, $url);
+            {
+                let mut $builder = builder;
+                $bl;
+                if let Some(out_resp) = out_resp {
+                    for (k, v) in out_resp.headers { 
+                        $builder = $builder.header(k, v); 
+                    }
+                }
+                builder = $builder;
+            }
+            let res = builder.send().unwrap();
+            
+            let ret = sspi.http_outgoing_auth(|header| Ok(res.headers().get_all(header).into_iter().map(|x| x.to_str().unwrap()).collect())).unwrap();
+            match ret {
+                winauth::http::AuthState::Response(resp) => {
+                    out_resp = Some(resp);
+                }
+                // We treat both cases as successful. Depending on requirements
+                // you might want to require authentication (Success)
+                winauth::http::AuthState::Success | winauth::http::AuthState::NotRequested => break res,
+            }
+        }
+    }}
+}
