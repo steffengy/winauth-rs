@@ -10,3 +10,21 @@ the builtin windows authentication.
 This currently provides support for windows authentication using the following protocols:
 - NTLMv2
 
+A quick and easy way one liner to get going is as follows:
+
+    extern crate winauth;
+    use crate::winauth::http::Authenticator;
+    
+    fn main() {
+        let mut url : String = r##"http://localhost:54999/API/API?ACTION=ViewActiveDirectoryProfile&AD_ENTRY="##.to_string();
+        url = [
+               url.to_string(),
+               urlencoding::encode(r##"{"mail":"jsmith"}"##).to_string(),
+        ].join("");        
+        let mut res = winauth::perform_ntlm_request!(reqwest::Method::GET, &url, builder, {
+            builder = builder.header("foo", "bar");
+        });
+        println!("Response {:?}", res);
+        println!("Body: {:?}", res.text().unwrap());
+    }
+
