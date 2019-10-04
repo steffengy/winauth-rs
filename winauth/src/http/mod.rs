@@ -98,20 +98,21 @@ pub trait Authenticator: crate::NextBytes {
     }
 }
 
+
+///perform_ntlm_request performs an ntlm request quickly, and easily.
 #[macro_export]
 macro_rules! perform_ntlm_request {
-    ($method:expr, $url:expr, $builder:ident, $bl:expr) => {{
+    ($method:expr, $url:expr, $builder:ident, $bl:expr, $spn: expr) => {{        
         let client = reqwest::Client::new();
         let mut out_resp: Option<winauth::http::Response> = None;
         let mut sspi = winauth::windows::NtlmSspiBuilder::new()
             .outbound()
-            // .target_spn("HTTP/localhost:3030")
+            .target_spn($spn)
             .build()
-            .unwrap();
+            .expect("There was an error building the sspi.");
 
         loop
         {
-            println!("Perform req...");
             let mut builder = client.request($method, $url);
             {
                 let mut $builder = builder;
@@ -123,16 +124,36 @@ macro_rules! perform_ntlm_request {
                 }
                 builder = $builder;
             }
-            let res = builder.send().unwrap();
+            let res = builder.send().expect("There was an error sending your request.");
+
+            let authentication_state = sspi.http_outgoing_auth(
+                |header| 
+                        Ok(
+                            res.headers()
+                                .get_all(header)
+                                .into_iter()
+                                .map(
+                                    |x| 
+                                        x.to_str().expect("There was an error mapping your header.")
+                                    )
+                                .collect()
+                        )
+            ).expect("There was an error retrieving the authentication state of your request.");
             
-            let ret = sspi.http_outgoing_auth(|header| Ok(res.headers().get_all(header).into_iter().map(|x| x.to_str().unwrap()).collect())).unwrap();
-            match ret {
+            match authentication_state {
                 winauth::http::AuthState::Response(resp) => {
+                    //Update the response value
                     out_resp = Some(resp);
                 }
-                // We treat both cases as successful. Depending on requirements
-                // you might want to require authentication (Success)
-                winauth::http::AuthState::Success | winauth::http::AuthState::NotRequested => break res,
+                winauth::http::AuthState::Success => {
+                    break res
+                },
+                winauth::http::AuthState::NotRequested => {
+                    break res
+                },
+                _ => {
+                    panic!("The authentication state is not valid.");
+                },
             }
         }
     }}
