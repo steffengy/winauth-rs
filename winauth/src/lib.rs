@@ -85,6 +85,7 @@ macro_rules! uint_enum {
 
 bitflags! {
     /// as documented in 2.2.2.5 NEGOTIATE
+    #[derive(Copy, Clone, Debug)]
     struct NegotiateFlags: u32 {
         /// W-bit
         /// requests 56-bit encryption
@@ -220,6 +221,7 @@ uint_enum! {
 }
 
 bitflags! {
+    #[derive(Copy, Clone, Debug)]
     struct AvFlags: u32 {
         const AVF_ACCOUNT_AUTH_CONSTRAINED = 0x01;
         const AVF_MIC_FIELD_POPULATED = 0x02;

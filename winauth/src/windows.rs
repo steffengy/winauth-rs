@@ -1,8 +1,6 @@
 //! Windows-Native NTLM functionalities (including SSO capabilities)
 //!
 //! This is mainly used to verify our implementation
-extern crate winapi;
-
 use std::ffi::OsString;
 use std::io;
 use std::mem;
@@ -10,15 +8,14 @@ use std::ptr;
 use std::slice;
 use std::os::windows::ffi::OsStringExt;
 
-use self::winapi::ctypes;
-use self::winapi::shared::sspi;
-use self::winapi::shared::winerror;
+use windows_sys::Win32::Security::Authentication::Identity as sspi;
+use windows_sys::Win32::Foundation as winerror;
 
 use crate::NextBytes;
 
 static NTLM_PROVIDER: &'static [u8] = b"NTLM\0";
 
-const INIT_REQUEST_FLAGS: ctypes::c_ulong = sspi::ISC_REQ_CONFIDENTIALITY
+const INIT_REQUEST_FLAGS: sspi::ISC_REQ_FLAGS = sspi::ISC_REQ_CONFIDENTIALITY
     | sspi::ISC_REQ_INTEGRITY
     | sspi::ISC_REQ_REPLAY_DETECT
     | sspi::ISC_REQ_SEQUENCE_DETECT
@@ -27,7 +24,7 @@ const INIT_REQUEST_FLAGS: ctypes::c_ulong = sspi::ISC_REQ_CONFIDENTIALITY
     | sspi::ISC_REQ_USE_SESSION_KEY
     | sspi::ISC_REQ_ALLOCATE_MEMORY;
 
-const ACCEPT_REQUEST_FLAGS: ctypes::c_ulong = sspi::ASC_REQ_CONFIDENTIALITY
+const ACCEPT_REQUEST_FLAGS: sspi::ASC_REQ_FLAGS = sspi::ASC_REQ_CONFIDENTIALITY
     | sspi::ASC_REQ_INTEGRITY
     | sspi::ASC_REQ_REPLAY_DETECT
     | sspi::ASC_REQ_SEQUENCE_DETECT
@@ -106,7 +103,7 @@ impl NtlmSspi {
             // accquire the initial token (negotiate for either kerberos or NTLM)
             let ret = sspi::AcquireCredentialsHandleA(
                 ptr::null_mut(),
-                NTLM_PROVIDER.as_ptr() as *mut i8,
+                NTLM_PROVIDER.as_ptr() as *mut _,
                 direction,
                 ptr::null_mut(),
                 ptr::null_mut(),
@@ -344,7 +341,7 @@ mod tests {
 }
 
 // some helper stuff imported frm schannel.rs
-struct NtlmCred(sspi::CredHandle);
+struct NtlmCred(windows_sys::Win32::Security::Credentials::SecHandle);
 
 impl Drop for NtlmCred {
     fn drop(&mut self) {
@@ -354,7 +351,7 @@ impl Drop for NtlmCred {
     }
 }
 
-struct SecurityContext(sspi::CtxtHandle);
+struct SecurityContext(windows_sys::Win32::Security::Credentials::SecHandle);
 
 impl Drop for SecurityContext {
     fn drop(&mut self) {
@@ -381,22 +378,22 @@ impl AsRef<[u8]> for ContextBuffer {
     }
 }
 
-unsafe fn secbuf(buftype: ctypes::c_ulong, bytes: Option<&[u8]>) -> sspi::SecBuffer {
+unsafe fn secbuf(buftype: u32, bytes: Option<&[u8]>) -> sspi::SecBuffer {
     let (ptr, len) = match bytes {
-        Some(bytes) => (bytes.as_ptr(), bytes.len() as ctypes::c_ulong),
+        Some(bytes) => (bytes.as_ptr(), bytes.len() as _),
         None => (ptr::null(), 0),
     };
     sspi::SecBuffer {
         BufferType: buftype,
         cbBuffer: len,
-        pvBuffer: ptr as *mut ctypes::c_void,
+        pvBuffer: ptr as *mut _,
     }
 }
 
 unsafe fn secbuf_desc(bufs: &mut [sspi::SecBuffer]) -> sspi::SecBufferDesc {
     sspi::SecBufferDesc {
         ulVersion: sspi::SECBUFFER_VERSION,
-        cBuffers: bufs.len() as ctypes::c_ulong,
+        cBuffers: bufs.len() as _,
         pBuffers: bufs.as_mut_ptr(),
     }
 }

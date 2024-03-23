@@ -10,17 +10,17 @@ keywords = ["ntlm", "sspi", "winauth"]
 edition = "2018"
 
 [dependencies]
-bitflags = "1.1"
-byteorder = "1.2.0"
-rand = "0.7"
-md5 = "0.6.1"
-base64 = { version = "0.10" }
+bitflags = "2.5"
+byteorder = "1.5.0"
+rand = "0.8"
+md5 = "0.7.0"
+base64 = { version = "0.22" }
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["winerror", "sspi"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security_Authentication_Identity"] }
 
 [dev-dependencies]
-hyper = "0.12"
-hyper-tls = "0.3"
-reqwest= "0.9"
-cfg-if = "0.1"
+hyper = "1.2"
+hyper-tls = "0.6"
+reqwest= "0.12"
+cfg-if = "1.0"

@@ -1,8 +1,7 @@
-WinAuth
+WinAuth [![.github/workflows/ci.yaml](https://github.com/steffengy/winauth-rs/actions/workflows/ci.yaml/badge.svg)](https://github.com/steffengy/winauth-rs/actions/workflows/ci.yaml)
 =======
 
-[![Build Status](https://dev.azure.com/steffengy/winauth-rs/_apis/build/status/winauth-rs-CI?branchName=master)](https://dev.azure.com/steffengy/winauth-rs/_build/latest?definitionId=1&branchName=master)
-[![Documentation](https://docs.rs/winauth/badge.svg)](https://docs.rs/winauth)  
+[![Documentation](https://docs.rs/winauth/badge.svg)](https://docs.rs/winauth/latest/x86_64-pc-windows-msvc/winauth/index.html)  
 
 The intention of this crate is to provide support to authenticate against windows systems using
 the builtin windows authentication.
