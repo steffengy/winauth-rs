@@ -21,6 +21,9 @@ windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Securit
 
 [dev-dependencies]
 hyper = "1.2"
+tokio = { version = "1", features = ["full"] }
 hyper-tls = "0.6"
 reqwest= "0.12"
 cfg-if = "1.0"
+hyper-util = { version = "0.1", features = ["full"] }
+http-body-util = "0.1"

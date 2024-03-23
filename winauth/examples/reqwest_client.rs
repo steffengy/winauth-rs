@@ -24,7 +24,7 @@ macro_rules! perform_ntlm_request {
                 }
                 builder = $builder;
             }
-            let res = builder.send()?;
+            let res = builder.send().await?;
             
             let ret = sspi.http_outgoing_auth(|header| Ok(res.headers().get_all(header).into_iter().map(|x| x.to_str().unwrap()).collect()))?;
             match ret {
@@ -43,13 +43,14 @@ use cfg_if::cfg_if;
 cfg_if! {
     if #[cfg(windows)] {
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut res = perform_ntlm_request!(reqwest::Method::GET, "http://localhost:3000", builder, {
         builder = builder.header("foo", "bar");
     });
     
     println!("Response {:?}", res);
-    println!("Body: {:?}", res.text().unwrap());
+    println!("Body: {:?}", res.text().await?);
 
     Ok(())
 }
